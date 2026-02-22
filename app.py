@@ -43,7 +43,7 @@ def perform_ocr(image_bytes, access_token):
         return f"[请求异常: {str(e)}]"
 
 # ==========================================
-# 2. AI 结构化提取模块 (终极抗遗漏版：强保局部治疗与原文细节)
+# 2. AI 结构化提取模块 (终极逻辑版：精准分线 + 涵盖转归)
 # ==========================================
 def extract_complex_case(patient_text):
     client = OpenAI(
@@ -54,39 +54,45 @@ def extract_complex_case(patient_text):
     你是一位极其严谨的肿瘤内科主任医师。请阅读用户提供的真实长篇病历，将其拆解为标准的病例汇报结构。
     
     【核心指令与肿瘤内科铁律 - 极其重要，严禁漏字】：
-    1. 零删减原则：绝不要过度精简或自行概括！必须完整保留原病历中的详细客观描述。特别是【放疗】、【手术】、【介入微创】等局部治疗手段，绝对不允许遗漏！必须将它们一字不差地归入对应时间段的治疗过程中。
-    2. 严格的线数划分铁律：
-       - 只有在明确记录【疾病进展（PD）】或【复发】后彻底更改方案，才算开启下一线治疗。
-       - 若未进展而更改/停用部分药物，必须判定为【同一线的维持治疗】。
+    1. 零删减原则：完整保留原病历中的详细客观描述。特别是【放疗】、【手术】、【介入微创】等局部治疗手段，绝对不允许遗漏！
+    2. 严格的阶段与线数划分铁律：
+       - 【围手术期】：明确识别并标注【新辅助治疗】或【辅助治疗】，它们不计入晚期解救治疗的线数。
+       - 【晚期解救】：只要明确记录了【疾病进展（PD）】或【复发】，无论后续是“彻底换药”、“在原方案基础上加药(如加靶向)”还是“原方案跨线再挑战”，都必须判定为开启了全新的一线（如三线、四线、五线治疗）。
+       - 【维持治疗】：若未进展而更改/停用部分药物，必须判定为【同一线的维持治疗】。
     
     必须严格输出为以下 JSON 格式：
     {
         "cover": {"title": "晚期XXX癌综合治疗病例汇报"},
         "baseline": {
-            "patient_info": "患者姓名(只保留姓氏加某某)、性别、年龄",
-            "chief_complaint": "主诉（如无明确主诉，根据病史总结）",
+            "patient_info": "患者姓名(只保留姓氏)、性别、年龄",
+            "chief_complaint": "主诉",
             "diagnosis": "完整的临床及病理诊断（含分期）",
-            "key_exams": "关键的病理、基因检测、免疫组化或其他重要基线检查结果"
+            "key_exams": "关键的病理、基因检测等重要基线检查结果"
         },
         "treatments": [
             {
-                "phase": "遵守铁律推断的阶段（如：一线治疗 / 一线维持治疗 / 二线治疗）", 
+                "phase": "遵守铁律推断的阶段（如：新辅助治疗 / 辅助治疗 / 一线治疗 / 二线治疗 / 五线治疗 等）", 
                 "duration": "具体时间段", 
-                "regimen": "【严禁遗漏】完整保留该阶段所有的治疗措施原文（不仅包含化疗/靶向/免疫等全身用药，必须包含该阶段发生的放疗、手术、消融等局部治疗原文）", 
-                "imaging": "关键影像学评估结果原文保留（必须注明是PR, SD还是PD，以及具体的病灶变化描述）",
-                "markers": "肿瘤标志物变化情况原文保留（如CA19-9, CEA等的起伏，若原文未提及则写'未提及'）"
+                "regimen": "【严禁遗漏】完整保留该阶段所有的全身用药及局部治疗原文", 
+                "imaging": "关键影像学评估结果原文保留（注定PR, SD或PD）",
+                "markers": "肿瘤标志物变化情况原文保留"
             }
         ],
+        "current_admission": {
+            "exams": "单独提取【本次入院】或【最近一次随访】的异常检验指标原文（如升高的肿瘤标志物、异常的血常规/生化等）",
+            "imaging": "单独提取【本次入院】的影像学评估结论原文",
+            "plan": "提取目前的当前治疗方案、对症支持治疗以及后续的【随访计划/转归】原文"
+        },
         "timeline_events": [
             {
                 "date": "年月", 
-                "event_type": "必须填 'Treatment' 或 'Evaluation'",
-                "event": "若是Treatment，填具体方案(如'一线:AG+百泽安'或'局部放疗')；若是Evaluation，填疗效(如'肺部PD'或'维持SD')"
+                "event_type": "填 'Treatment' 或 'Evaluation'",
+                "event": "Treatment填方案(如'五线:四药联合'或'局部放疗')；Evaluation填疗效(如'PD'或'SD')"
             }
         ],
         "summary": ["基于原文提炼的治疗亮点总结1", "基于原文提炼的治疗亮点总结2"]
     }
-    注意：timeline_events 需提取全病程中最重要的【治疗换线节点】、【局部重大治疗节点（如放疗/手术）】和【影像学评估节点】，按时间先后排序，最多不超过8个。
+    注意：timeline_events 需提取全病程中最重要的换线节点、局部重大治疗和评估节点，按先后排序，最多不超过8个。
     """
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -99,7 +105,7 @@ def extract_complex_case(patient_text):
     return json.loads(response.choices[0].message.content)
 
 # ==========================================
-# 3. PPT 生成模块 (适配中大系主题色与学术排版)
+# 3. PPT 生成模块 (新增"本次入院与转归"页面)
 # ==========================================
 class AdvancedPPTMaker:
     def __init__(self, data):
@@ -108,9 +114,8 @@ class AdvancedPPTMaker:
         self.prs.slide_height = Inches(7.5)
         self.data = data
         
-        # 换成了类似中山一院院徽的紫红色 (Burgundy/Maroon) 作为主色调
+        # 中山一院紫红色 (Burgundy/Maroon) 主色调
         self.C_PRI = RGBColor(115, 21, 40)   
-        # 辅助色用沉稳的深蓝色
         self.C_ACC = RGBColor(0, 51, 102)  
 
     def add_header(self, slide, text):
@@ -143,7 +148,6 @@ class AdvancedPPTMaker:
         self.add_header(slide, "病例介绍 (基线资料)")
         base_data = self.data.get("baseline", {})
         
-        # 按照模板结构拼接
         content = f"【患者信息】 {base_data.get('patient_info', '')}\n\n" \
                   f"【主诉】 {base_data.get('chief_complaint', '')}\n\n" \
                   f"【临床诊断】\n{base_data.get('diagnosis', '')}\n\n" \
@@ -171,7 +175,7 @@ class AdvancedPPTMaker:
             p1.font.color.rgb = self.C_PRI
             
             p2 = tf.add_paragraph()
-            p2.text = f"\n【用药方案】\n{tx.get('regimen', '')}"
+            p2.text = f"\n【用药方案及局部治疗】\n{tx.get('regimen', '')}"
             p2.font.size = Pt(16) 
             
             p3 = tf.add_paragraph()
@@ -184,8 +188,29 @@ class AdvancedPPTMaker:
             p4.font.size = Pt(16) 
             p4.font.color.rgb = self.C_ACC
 
+    def make_current_admission(self):
+        """新增：本次入院评估及后续治疗计划"""
+        adm_data = self.data.get("current_admission")
+        if not adm_data or not any(adm_data.values()): 
+            return # 如果这部分为空则跳过
+            
+        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+        self.add_header(slide, "本次入院评估及后续计划 (转归)")
+        
+        content = f"【本次入院检验指标】\n{adm_data.get('exams', '')}\n\n" \
+                  f"【本次影像学评估】\n{adm_data.get('imaging', '')}\n\n" \
+                  f"【当前治疗与后续随访计划】\n{adm_data.get('plan', '')}"
+                  
+        tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
+        tf = tb.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.text = content
+        p.font.size = Pt(18)
+        # 将关键字标红高亮（可选的简单排版优化）
+        p.font.color.rgb = RGBColor(30, 30, 30)
+
     def make_timeline(self):
-        """专业版时间轴：分离治疗节点与评估节点"""
         events = self.data.get("timeline_events", [])
         if not events: return
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
@@ -205,18 +230,16 @@ class AdvancedPPTMaker:
             event_text = evt.get("event", "")
             event_type = evt.get("event_type", "Treatment")
             
-            # 智能判断颜色：如果是PD/进展标红；如果是PR/SD标绿；如果是治疗方案则用主色调
             is_pd = "进展" in event_text or "PD" in event_text.upper() or "复发" in event_text
             is_control = "PR" in event_text.upper() or "SD" in event_text.upper() or "缩小" in event_text
             
             if is_pd:
-                node_color = RGBColor(220, 50, 50) # 警示红
+                node_color = RGBColor(220, 50, 50) 
             elif is_control and event_type == "Evaluation":
-                node_color = RGBColor(46, 139, 87) # 稳定绿
+                node_color = RGBColor(46, 139, 87) 
             else:
-                node_color = self.C_PRI # 治疗紫红
+                node_color = self.C_PRI 
             
-            # 上下交错防止重叠
             stem_top = line_y - Inches(1.2) if i % 2 == 0 else line_y
             stem_height = Inches(1.2)
             stem = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x + Inches(0.13), stem_top, Inches(0.04), stem_height)
@@ -240,7 +263,6 @@ class AdvancedPPTMaker:
             tf = card.text_frame
             tf.word_wrap = True
             
-            # 日期
             p0 = tf.paragraphs[0]
             p0.text = evt.get("date", "")
             p0.font.bold = True
@@ -248,7 +270,6 @@ class AdvancedPPTMaker:
             p0.font.color.rgb = node_color
             p0.alignment = PP_ALIGN.CENTER
             
-            # 标签：区分是【评估】还是【方案】
             p_tag = tf.add_paragraph()
             p_tag.text = "【评估】" if event_type == "Evaluation" else "【方案】"
             p_tag.font.size = Pt(9)
@@ -256,7 +277,6 @@ class AdvancedPPTMaker:
             p_tag.font.color.rgb = node_color
             p_tag.alignment = PP_ALIGN.CENTER
             
-            # 事件内容
             p1 = tf.add_paragraph()
             p1.text = event_text
             p1.font.size = Pt(10)
@@ -279,8 +299,11 @@ class AdvancedPPTMaker:
         self.make_cover()
         self.make_baseline()
         self.make_treatments()
+        # 新增的调用：插入转归页面
+        self.make_current_admission()
         self.make_timeline()
         self.make_summary()
+        
         ppt_stream = io.BytesIO()
         self.prs.save(ppt_stream)
         ppt_stream.seek(0)
@@ -340,7 +363,7 @@ with tab1:
                     ppt_file = maker.build()
                 st.success("✅ 专业版病例幻灯片已生成就绪！")
                 st.download_button(
-                    label="📥 立即下载 PPT (含完整细节保留)",
+                    label="📥 立即下载 PPT (含转归与全细节保留)",
                     data=ppt_file,
                     file_name="病例汇报_多图连拍版.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -368,11 +391,10 @@ with tab2:
                         st.json(case_json)
                 with col2:
                     st.download_button(
-                        label="📥 立即下载 PPT",
+                        label="📥 立即下载 PPT (含转归)",
                         data=ppt_file,
                         file_name="病例汇报_文本版.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
             except Exception as e:
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
-
