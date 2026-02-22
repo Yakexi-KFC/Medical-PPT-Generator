@@ -18,7 +18,7 @@ BAIDU_SECRET_KEY = st.secrets["BAIDU_SECRET_KEY"]
 DEEPSEEK_API_KEY = st.secrets["DEEPSEEK_API_KEY"]
 
 # ==========================================
-# 1. 百度 OCR 图片识别模块 (支持批量识别)
+# 1. 百度 OCR 图片识别模块
 # ==========================================
 def get_baidu_access_token():
     url = f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={BAIDU_API_KEY}&client_secret={BAIDU_SECRET_KEY}"
@@ -43,7 +43,7 @@ def perform_ocr(image_bytes, access_token):
         return f"[请求异常: {str(e)}]"
 
 # ==========================================
-# 2. AI 结构化提取模块 (强化：不删减原意 + 自动推断治疗线数)
+# 2. AI 结构化提取模块 (完美适配真实临床汇报模板)
 # ==========================================
 def extract_complex_case(patient_text):
     client = OpenAI(
@@ -53,35 +53,40 @@ def extract_complex_case(patient_text):
     system_prompt = """
     你是一位严谨的肿瘤内科主任医师。请阅读用户提供的真实长篇病历，将其拆解为标准的病例汇报结构。
     
-    【核心指令与肿瘤内科铁律 - 极其重要】：
+    【核心指令与肿瘤内科铁律】：
     1. 原汁原味：绝不要过度精简，必须尽可能保留原病历中的详细客观描述（如肿瘤大小数值、生化指标、用药剂量）。
-    2. 严格的线数划分铁律（必须遵守）：
-       - 只有在明确记录【疾病进展（PD）】或【复发】后彻底更改方案，才算开启下一线治疗（如二线、三线）。
-       - 如果在未进展（如PR、CR、SD）的情况下，仅仅是停用部分毒副反应大的药物（如化疗），保留或替换免疫/靶向药物进行延续治疗，必须判定为【同一线的维持治疗】（例如：二线未进展时改为百泽安+索凡替尼，严禁称为三线，必须标为“二线维持治疗”）。
-       - 手术前后的辅助/新辅助治疗，不计入晚期解救治疗的线数。
+    2. 严格的线数划分铁律：
+       - 只有在明确记录【疾病进展（PD）】或【复发】后彻底更改方案，才算开启下一线治疗。
+       - 若未进展而更改/停用部分药物，必须判定为【同一线的维持治疗】。
     
     必须严格输出为以下 JSON 格式：
     {
         "cover": {"title": "晚期XXX癌综合治疗病例汇报"},
         "baseline": {
-            "info": "保留基本信息原文",
-            "diagnosis": "保留诊断与分期原文",
-            "molecular": "保留基因检测原文"
+            "patient_info": "患者姓名(只保留姓氏加某某)、性别、年龄",
+            "chief_complaint": "主诉（如无明确主诉，请根据病史总结一句）",
+            "diagnosis": "完整的临床及病理诊断（含分期）",
+            "key_exams": "关键的病理、基因检测、免疫组化或其他重要基线检查结果"
         },
         "treatments": [
             {
-                "phase": "遵守铁律推断的阶段（如：一线治疗 / 一线维持治疗 / 进展后二线治疗）", 
+                "phase": "遵守铁律推断的阶段（如：一线治疗 / 一线维持治疗 / 二线治疗）", 
                 "duration": "具体时间段", 
-                "regimen": "用药方案及调整经过原文", 
-                "efficacy": "疗效评估原文"
+                "regimen": "用药方案、剂量及调整经过原文", 
+                "imaging": "关键影像学评估结果（必须注明是PR, SD还是PD，以及具体的病灶变化描述）",
+                "markers": "肿瘤标志物变化情况（如CA19-9, CEA等的起伏，若原文未提及则写'未提及'）"
             }
         ],
         "timeline_events": [
-            {"date": "年月", "event": "核心事件摘要（如包含疾病进展，请写明'进展'或'PD'），限15个字内"}
+            {
+                "date": "年月", 
+                "event_type": "必须填 'Treatment' 或 'Evaluation'",
+                "event": "若是Treatment，填具体方案(如'一线:AG+百泽安')；若是Evaluation，填疗效(如'肺部PD'或'维持SD')"
+            }
         ],
         "summary": ["基于原文提炼的治疗亮点总结1", "基于原文提炼的治疗亮点总结2"]
     }
-    注意：timeline_events 数组最多提取 6 个最重要的节点，按时间先后排序。
+    注意：timeline_events 需提取全病程中最重要的【治疗换线节点】和【影像学评估节点】，按时间先后排序，最多不超过8个。
     """
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -94,7 +99,7 @@ def extract_complex_case(patient_text):
     return json.loads(response.choices[0].message.content)
 
 # ==========================================
-# 3. PPT 生成模块 (适配海量文字排版)
+# 3. PPT 生成模块 (适配中大系主题色与学术排版)
 # ==========================================
 class AdvancedPPTMaker:
     def __init__(self, data):
@@ -102,15 +107,18 @@ class AdvancedPPTMaker:
         self.prs.slide_width = Inches(13.333) 
         self.prs.slide_height = Inches(7.5)
         self.data = data
-        self.C_PRI = RGBColor(0, 51, 102)   
-        self.C_ACC = RGBColor(0, 153, 153)  
+        
+        # 换成了类似中山一院院徽的紫红色 (Burgundy/Maroon) 作为主色调
+        self.C_PRI = RGBColor(115, 21, 40)   
+        # 辅助色用沉稳的深蓝色
+        self.C_ACC = RGBColor(0, 51, 102)  
 
     def add_header(self, slide, text):
-        shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.33), Inches(1.0))
+        shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.33), Inches(0.9))
         shape.fill.solid()
         shape.fill.fore_color.rgb = self.C_PRI
         shape.line.fill.background()
-        tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.1), Inches(10), Inches(0.8))
+        tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.05), Inches(10), Inches(0.8))
         p = tb.text_frame.paragraphs[0]
         p.text = text
         p.font.size = Pt(28)
@@ -124,7 +132,7 @@ class AdvancedPPTMaker:
         shape.fill.fore_color.rgb = self.C_PRI
         tb = slide.shapes.add_textbox(Inches(1.5), Inches(3), Inches(10), Inches(2))
         p = tb.text_frame.paragraphs[0]
-        p.text = self.data["cover"]["title"]
+        p.text = self.data.get("cover", {}).get("title", "病例汇报")
         p.font.size = Pt(48)
         p.font.bold = True
         p.font.color.rgb = RGBColor(255, 255, 255)
@@ -132,23 +140,27 @@ class AdvancedPPTMaker:
 
     def make_baseline(self):
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
-        self.add_header(slide, "患者基线资料")
-        base_data = self.data["baseline"]
-        content = f"【基本信息】\n{base_data.get('info', '')}\n\n" \
+        self.add_header(slide, "病例介绍 (基线资料)")
+        base_data = self.data.get("baseline", {})
+        
+        # 按照模板结构拼接
+        content = f"【患者信息】 {base_data.get('patient_info', '')}\n\n" \
+                  f"【主诉】 {base_data.get('chief_complaint', '')}\n\n" \
                   f"【临床诊断】\n{base_data.get('diagnosis', '')}\n\n" \
-                  f"【分子病理】\n{base_data.get('molecular', '')}"
-        tb = slide.shapes.add_textbox(Inches(1), Inches(1.2), Inches(11), Inches(6))
+                  f"【关键检查/病理】\n{base_data.get('key_exams', '')}"
+                  
+        tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
         tf = tb.text_frame
         tf.word_wrap = True
         p = tf.paragraphs[0]
         p.text = content
-        p.font.size = Pt(18) # 调小字号容纳大量细节
+        p.font.size = Pt(20) 
         
     def make_treatments(self):
         for tx in self.data.get("treatments", []):
             slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
             self.add_header(slide, f"治疗经过：{tx.get('phase', '阶段治疗')}")
-            tb = slide.shapes.add_textbox(Inches(1), Inches(1.2), Inches(11), Inches(6))
+            tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
             tf = tb.text_frame
             tf.word_wrap = True 
             
@@ -156,42 +168,55 @@ class AdvancedPPTMaker:
             p1.text = f"【治疗时间】 {tx.get('duration', '')}"
             p1.font.size = Pt(20) 
             p1.font.bold = True
+            p1.font.color.rgb = self.C_PRI
             
             p2 = tf.add_paragraph()
-            p2.text = f"\n【用药方案及调整经过】\n{tx.get('regimen', '')}"
-            p2.font.size = Pt(16) # 调小字号，完美容纳大量保留的原始病历描述
+            p2.text = f"\n【用药方案】\n{tx.get('regimen', '')}"
+            p2.font.size = Pt(16) 
             
             p3 = tf.add_paragraph()
-            p3.text = f"\n【疗效评估与随访】\n{tx.get('efficacy', '')}"
+            p3.text = f"\n【影像学评估】\n{tx.get('imaging', '')}"
             p3.font.size = Pt(16) 
-            p3.font.color.rgb = self.C_ACC
+            p3.font.color.rgb = RGBColor(50, 50, 50)
+            
+            p4 = tf.add_paragraph()
+            p4.text = f"\n【肿瘤标志物】\n{tx.get('markers', '')}"
+            p4.font.size = Pt(16) 
+            p4.font.color.rgb = self.C_ACC
 
     def make_timeline(self):
-        """专业版时间轴：带引线、卡片、及语义色彩警示"""
+        """专业版时间轴：分离治疗节点与评估节点"""
         events = self.data.get("timeline_events", [])
         if not events: return
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self.add_header(slide, "全病程时间轴概览 (Timeline)")
         
-        # 1. 画一根带箭头的灰色主轴线
         line_y = Inches(4.2)
-        main_line = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(1), line_y - Inches(0.05), Inches(11.3), Inches(0.1))
+        main_line = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(0.5), line_y - Inches(0.05), Inches(12.3), Inches(0.1))
         main_line.fill.solid()
-        main_line.fill.fore_color.rgb = RGBColor(220, 220, 220) # 浅灰主轴
+        main_line.fill.fore_color.rgb = RGBColor(220, 220, 220) 
         main_line.line.fill.background()
         
-        start_x = Inches(1.5)
-        interval = Inches(10 / max(len(events), 1)) 
+        start_x = Inches(1.0)
+        interval = Inches(11.0 / max(len(events), 1)) 
         
-        for i, evt in enumerate(events[:6]): 
+        for i, evt in enumerate(events[:8]): 
             x = start_x + (i * interval)
             event_text = evt.get("event", "")
+            event_type = evt.get("event_type", "Treatment")
             
-            # 【高级特效】语义识别颜色：如果事件包含“PD/进展/复发”，自动标红！否则用主色调蓝色。
+            # 智能判断颜色：如果是PD/进展标红；如果是PR/SD标绿；如果是治疗方案则用主色调
             is_pd = "进展" in event_text or "PD" in event_text.upper() or "复发" in event_text
-            node_color = RGBColor(220, 50, 50) if is_pd else self.C_PRI
+            is_control = "PR" in event_text.upper() or "SD" in event_text.upper() or "缩小" in event_text
             
-            # 2. 画竖直连接线 (Stem)
+            if is_pd:
+                node_color = RGBColor(220, 50, 50) # 警示红
+            elif is_control and event_type == "Evaluation":
+                node_color = RGBColor(46, 139, 87) # 稳定绿
+            else:
+                node_color = self.C_PRI # 治疗紫红
+            
+            # 上下交错防止重叠
             stem_top = line_y - Inches(1.2) if i % 2 == 0 else line_y
             stem_height = Inches(1.2)
             stem = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x + Inches(0.13), stem_top, Inches(0.04), stem_height)
@@ -199,42 +224,49 @@ class AdvancedPPTMaker:
             stem.fill.fore_color.rgb = node_color
             stem.line.fill.background()
             
-            # 3. 画时间轴上的圆点
             circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, x, line_y - Inches(0.15), Inches(0.3), Inches(0.3))
             circle.fill.solid()
             circle.fill.fore_color.rgb = node_color
-            circle.line.color.rgb = RGBColor(255, 255, 255) # 白色描边显得更精致
+            circle.line.color.rgb = RGBColor(255, 255, 255) 
             circle.line.width = Pt(2)
             
-            # 4. 画带有边框的圆角文本卡片
-            card_top = line_y - Inches(2.2) if i % 2 == 0 else line_y + Inches(1.2)
-            card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x - Inches(0.8), card_top, Inches(1.8), Inches(1.0))
+            card_top = line_y - Inches(2.4) if i % 2 == 0 else line_y + Inches(1.2)
+            card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x - Inches(0.7), card_top, Inches(1.6), Inches(1.2))
             card.fill.solid()
-            card.fill.fore_color.rgb = RGBColor(250, 250, 250) # 卡片白底
-            card.line.color.rgb = node_color # 边框颜色跟随状态
+            card.fill.fore_color.rgb = RGBColor(250, 250, 250) 
+            card.line.color.rgb = node_color 
             card.line.width = Pt(1.5)
             
-            # 5. 往卡片里填字
             tf = card.text_frame
             tf.word_wrap = True
             
+            # 日期
             p0 = tf.paragraphs[0]
             p0.text = evt.get("date", "")
             p0.font.bold = True
-            p0.font.size = Pt(12)
+            p0.font.size = Pt(11)
             p0.font.color.rgb = node_color
             p0.alignment = PP_ALIGN.CENTER
             
+            # 标签：区分是【评估】还是【方案】
+            p_tag = tf.add_paragraph()
+            p_tag.text = "【评估】" if event_type == "Evaluation" else "【方案】"
+            p_tag.font.size = Pt(9)
+            p_tag.font.bold = True
+            p_tag.font.color.rgb = node_color
+            p_tag.alignment = PP_ALIGN.CENTER
+            
+            # 事件内容
             p1 = tf.add_paragraph()
             p1.text = event_text
-            p1.font.size = Pt(11)
-            p1.font.color.rgb = RGBColor(50, 50, 50)
+            p1.font.size = Pt(10)
+            p1.font.color.rgb = RGBColor(30, 30, 30)
             p1.alignment = PP_ALIGN.CENTER
 
     def make_summary(self):
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self.add_header(slide, "病例小结与思考")
-        tb = slide.shapes.add_textbox(Inches(1), Inches(1.5), Inches(11), Inches(5))
+        tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.5), Inches(11.5), Inches(5))
         tf = tb.text_frame
         tf.word_wrap = True
         for item in self.data.get("summary", []):
@@ -255,7 +287,7 @@ class AdvancedPPTMaker:
         return ppt_stream
 
 # ==========================================
-# 4. Streamlit 网页前端 (支持多图批量上传)
+# 4. Streamlit 网页前端
 # ==========================================
 st.set_page_config(page_title="Pro级肿瘤病例PPT生成", layout="wide")
 st.title("🩺 医疗级病史 PPT 自动生成排版系统")
@@ -267,7 +299,6 @@ if "ocr_result_text" not in st.session_state:
 
 with tab1:
     st.markdown("### 第一步：批量上传病历图片")
-    # 核心修改点：加入 accept_multiple_files=True 支持多选图片
     uploaded_files = st.file_uploader(
         "支持拍照上传多张化验单、出院小结等（按顺序多选即可）", 
         type=["png", "jpg", "jpeg"], 
@@ -276,7 +307,6 @@ with tab1:
     
     if uploaded_files:
         st.info(f"📁 已选择 {len(uploaded_files)} 张图片。")
-        
         if st.button("🔍 开始批量提取文字"):
             with st.spinner("正在呼叫百度高精度 OCR 引擎扫描所有图片..."):
                 token = get_baidu_access_token()
@@ -284,19 +314,14 @@ with tab1:
                     st.error("获取百度 API 授权失败，请检查密钥。")
                 else:
                     all_extracted_text = []
-                    # 循环处理每一张图片
                     for i, file in enumerate(uploaded_files):
                         image_bytes = file.getvalue()
                         text = perform_ocr(image_bytes, token)
                         all_extracted_text.append(f"【第 {i+1} 页提取结果】\n{text}\n")
-                    
-                    # 拼接所有文字
                     st.session_state.ocr_result_text = "\n".join(all_extracted_text)
             st.success("✅ 文字提取成功！请在下方核对。")
 
     st.markdown("### 第二步：人工校对与修改")
-    st.info("💡 医疗数据容不得马虎，请核对 OCR 识别出的文字（尤其注意多页之间的拼接是否连贯），确认无误后再生成 PPT。")
-    
     final_text_to_process = st.text_area(
         "校对并补全病史（支持手动补充没拍全的信息）：", 
         value=st.session_state.ocr_result_text, 
@@ -349,5 +374,4 @@ with tab2:
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
             except Exception as e:
-
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
