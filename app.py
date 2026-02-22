@@ -43,7 +43,7 @@ def perform_ocr(image_bytes, access_token):
         return f"[请求异常: {str(e)}]"
 
 # ==========================================
-# 2. AI 结构化提取模块 (逻辑修正：严谨判定一线/辅助)
+# 2. AI 结构化提取模块 (严防漏药、严卡线数标准)
 # ==========================================
 def extract_complex_case(patient_text):
     client = OpenAI(
@@ -53,14 +53,14 @@ def extract_complex_case(patient_text):
     system_prompt = """
     你是一位极其严谨的肿瘤内科主任医师。请阅读用户提供的真实长篇病历，将其拆解为标准的病例汇报结构。
     
-    【核心指令 1：严谨的线数判定 (重点)】
-    - **非手术患者**：如果患者全程未进行根治性手术，其最初始的治疗**绝对属于【一线治疗】**，严禁标记为“新辅助”或“辅助治疗”。
-    - **手术患者**：只有明确记录了“行根治术”或“手术切除”的，术前才叫新辅助，术后才叫辅助。
-    - **晚期分线**：明确记录PD（进展/复发）后更改方案算下一线；未PD仅调整药物算维持。
+    【核心指令 1：严谨的线数判定 (重点！绝不可错)】
+    - **非手术患者**：如果患者未进行根治性手术，其初始治疗绝对属于【一线治疗】，严禁标记为新辅助或辅助。
+    - **同线维持与调整（严禁误判为新一线）**：只要影像学未明确提示疾病进展（PD），任何因毒副反应的停药、减量、转换为维持治疗（如二线改为百泽安+索凡替尼维持），或者仅因肿瘤标志物升高而增加靶向药（如四线期间加用安罗替尼），都**绝对不能**算作新的一线！必须将其作为“方案调整”或“维持治疗”合并在当前的治疗线数阶段内！
+    - 只有在明确记录影像学【PD】或【复发】后更改方案，才算开启下一线。
     
-    【核心指令 2：内容完整性】
-    - 完整保留放疗、介入等局部治疗手段，严禁遗漏。
-    - 本次入院的检查结果整理为清晰列表。
+    【核心指令 2：治疗细节的完整保留 (严防遗漏)】
+    - `regimen` 字段必须包含该线治疗的**全过程**。如果该阶段包含前期方案和后期的维持/加药，必须按时间顺序列在同一个 `regimen` 中（如：前期行AG+百泽安，后期行百泽安+索凡替尼维持；前期行四药，后期加用安罗替尼），严禁遗漏维持或加药部分！
+    - 完整保留放疗、介入等局部治疗。
     
     必须严格输出为以下 JSON 格式：
     {
@@ -69,33 +69,33 @@ def extract_complex_case(patient_text):
             "patient_info": "患者姓名(只保留姓氏)、性别、年龄",
             "chief_complaint": "主诉",
             "diagnosis": "完整的临床及病理诊断（含分期）",
-            "key_exams": "关键的病理、基因检测等重要基线检查结果"
+            "key_exams": "关键的基线检查结果"
         },
         "treatments": [
             {
-                "phase": "阶段名称（如：一线治疗 / 二线治疗 / 辅助治疗）", 
-                "duration": "具体时间段", 
-                "regimen": "完整保留该阶段所有的全身用药及局部治疗原文", 
-                "imaging": "关键影像学评估结果原文保留",
-                "markers": "肿瘤标志物变化情况原文保留"
+                "phase": "阶段（如：一线治疗 / 四线治疗）", 
+                "duration": "具体时间段（必须涵盖维持期或加药期）", 
+                "regimen": "【严禁遗漏】完整保留该阶段所有的全身用药经过（必须包含同一线内的维持用药和加药调整原文）及局部治疗", 
+                "imaging": "关键影像学评估结果",
+                "markers": "肿瘤标志物变化情况"
             }
         ],
         "current_admission": {
             "exams": ["检验指标1", "检验指标2"],
-            "imaging": "本次影像学评估结论原文",
-            "plan": ["治疗计划1", "治疗计划2"]
+            "imaging": "本次影像学结论",
+            "plan": ["计划1", "计划2"]
         },
         "timeline_events": [
             {
                 "date": "年月", 
-                "phase": "注明阶段（如'一线'、'二线'、'评估'）",
+                "phase": "线数（如'一线'、'四线(加药)'、'二线维持'、'评估'）",
                 "event_type": "Treatment 或 Evaluation",
-                "event": "简短描述核心事件(限12字内)"
+                "event": "事件简述(限15字，必须提取出中途维持或加药的事件)"
             }
         ],
         "summary": ["总结点1", "总结点2"]
     }
-    注意：timeline_events 需提取全病程中最重要的节点，按先后排序，最多不超过8个。
+    注意：timeline_events 需提取全病程中所有的换线节点、同线加药/维持节点和评估节点，按先后排序，最多提取12个！
     """
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -108,7 +108,7 @@ def extract_complex_case(patient_text):
     return json.loads(response.choices[0].message.content)
 
 # ==========================================
-# 3. PPT 生成模块 (Timeline布局优化 + 逻辑清洗)
+# 3. PPT 生成模块
 # ==========================================
 class AdvancedPPTMaker:
     def __init__(self, data):
@@ -116,17 +116,13 @@ class AdvancedPPTMaker:
         self.prs.slide_width = Inches(13.333) 
         self.prs.slide_height = Inches(7.5)
         
-        # --- 逻辑清洗：防止AI由于惯性把非手术的初始治疗标为辅助 ---
         self.data = self.clean_data(data)
         
-        # 中山一院紫红色
         self.C_PRI = RGBColor(115, 21, 40)   
         self.C_ACC = RGBColor(0, 51, 102)  
 
     def clean_data(self, data):
-        """清洗数据：如果没做手术，强制把'辅助/新辅助'改为'一线'"""
         has_surgery = False
-        # 简单检查全文是否有手术相关字眼
         full_text = json.dumps(data, ensure_ascii=False)
         if "根治术" in full_text or "切除术" in full_text or "手术切除" in full_text:
             has_surgery = True
@@ -135,14 +131,11 @@ class AdvancedPPTMaker:
             for tx in data.get("treatments", []):
                 p = tx.get("phase", "")
                 if "辅助" in p:
-                    tx["phase"] = "一线治疗"  # 强制修正
-            
-            # 同步修正 timeline 里的标签
+                    tx["phase"] = "一线治疗" 
             for evt in data.get("timeline_events", []):
                 p = evt.get("phase", "")
                 if "辅助" in p:
                     evt["phase"] = "一线"
-                    
         return data
 
     def add_header(self, slide, text):
@@ -174,12 +167,10 @@ class AdvancedPPTMaker:
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self.add_header(slide, "病例介绍 (基线资料)")
         base_data = self.data.get("baseline", {})
-        
         content = f"【患者信息】 {base_data.get('patient_info', '')}\n\n" \
                   f"【主诉】 {base_data.get('chief_complaint', '')}\n\n" \
                   f"【临床诊断】\n{base_data.get('diagnosis', '')}\n\n" \
                   f"【关键检查/病理】\n{base_data.get('key_exams', '')}"
-                  
         tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
         tf = tb.text_frame
         tf.word_wrap = True
@@ -190,8 +181,6 @@ class AdvancedPPTMaker:
     def make_treatments(self):
         for tx in self.data.get("treatments", []):
             phase_name = tx.get('phase', '阶段治疗')
-            
-            # 双重保险：如果到了这一步还是辅助，且内容很少，就不生成这一页
             if "辅助" in phase_name and len(tx.get('regimen', '')) < 5:
                 continue
 
@@ -222,7 +211,6 @@ class AdvancedPPTMaker:
             p4.font.color.rgb = self.C_ACC
 
     def make_current_admission(self):
-        """智能分页的转归页面"""
         adm_data = self.data.get("current_admission")
         if not adm_data: return
         
@@ -283,7 +271,7 @@ class AdvancedPPTMaker:
             p.font.size = Pt(16)
 
     def make_timeline(self):
-        """Timeline 布局算法：两端对齐 + 动态缩放"""
+        """支持高达 12 个节点的动态微缩时间轴"""
         events = self.data.get("timeline_events", [])
         if not events: return
         
@@ -291,27 +279,35 @@ class AdvancedPPTMaker:
         self.add_header(slide, "全病程时间轴概览 (Timeline)")
         
         line_y = Inches(4.2)
-        start_x = Inches(1.0)
-        total_width = 11.5 
-        count = min(len(events), 8) 
+        start_x = Inches(0.6) # 起点更靠左，留出更多空间
+        total_width = 12.1 
+        count = min(len(events), 12) # 放宽到最多 12 个节点
         
-        if count > 6:
+        # 极高密度（10-12个节点）下的极小卡片
+        if count > 9:
+            card_width = Inches(0.95)
+            card_height = Inches(1.4)
+            font_size_date = Pt(9)
+            font_size_body = Pt(8)
+        # 中高密度（7-9个节点）下的中卡片
+        elif count > 6:
             card_width = Inches(1.3)
-            card_height = Inches(1.1)
+            card_height = Inches(1.2)
             font_size_date = Pt(10)
             font_size_body = Pt(9)
+        # 正常密度
         else:
             card_width = Inches(1.6)
             card_height = Inches(1.2)
             font_size_date = Pt(12)
             font_size_body = Pt(11)
 
-        main_line = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, start_x - Inches(0.2), line_y - Inches(0.05), Inches(total_width + 0.5), Inches(0.1))
+        main_line = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, start_x - Inches(0.2), line_y - Inches(0.05), Inches(total_width + 0.4), Inches(0.1))
         main_line.fill.solid()
         main_line.fill.fore_color.rgb = RGBColor(220, 220, 220) 
         main_line.line.fill.background()
         
-        for i, evt in enumerate(events[:8]): 
+        for i, evt in enumerate(events[:12]): 
             if count > 1:
                 x = start_x + Inches(total_width * (i / (count - 1)))
             else:
@@ -331,8 +327,9 @@ class AdvancedPPTMaker:
             else:
                 node_color = self.C_PRI 
             
-            stem_top = line_y - Inches(1.2) if i % 2 == 0 else line_y
-            stem_height = Inches(1.2)
+            # 动态计算连接线和卡片位置，防重叠绝对安全算法
+            stem_height = Inches(1.0)
+            stem_top = line_y - stem_height if i % 2 == 0 else line_y
             stem = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, stem_top, Inches(0.03), stem_height) 
             stem.fill.solid()
             stem.fill.fore_color.rgb = node_color
@@ -344,8 +341,10 @@ class AdvancedPPTMaker:
             circle.line.color.rgb = RGBColor(255, 255, 255) 
             circle.line.width = Pt(2)
             
-            card_top = line_y - Inches(2.4) if i % 2 == 0 else line_y + Inches(1.2)
+            # 卡片紧贴连接线末端
+            card_top = line_y - stem_height - card_height if i % 2 == 0 else line_y + stem_height
             card_x = x - (card_width / 2)
+            
             card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, card_x, card_top, card_width, card_height)
             card.fill.solid()
             card.fill.fore_color.rgb = RGBColor(250, 250, 250) 
