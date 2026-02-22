@@ -29,31 +29,15 @@ def get_baidu_access_token():
 
 def perform_ocr(image_bytes, access_token):
     try:
-        # === 优化版：防摩尔纹（屏幕翻拍专用）压缩逻辑 ===
-        # 如果图片大于 3MB，才进行压缩
-        if len(image_bytes) > 3 * 1024 * 1024:
+        # 基础防崩溃压缩：仅当图片真的大于 3.5MB 时，才做轻微的体积压缩
+        if len(image_bytes) > 3.5 * 1024 * 1024:
             from PIL import Image
             img = Image.open(io.BytesIO(image_bytes))
             if img.mode != 'RGB':
                 img = img.convert('RGB')
-            
-            # 【关键修改】：把分辨率上限从 2000 提高到 3800！
-            # 屏幕翻拍图绝不能缩得太小，必须保留足够的像素让 OCR 区分文字和屏幕网格
-            max_size = 3800
-            if max(img.size) > max_size:
-                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
-            
             output = io.BytesIO()
-            # 以 85 的高画质保存，避免文字发虚
-            img.save(output, format="JPEG", quality=85)
+            img.save(output, format="JPEG", quality=70) # 仅降低一点保存质量
             image_bytes = output.getvalue()
-            
-            # 【二次保险】：如果体积依然逼近百度的 4MB 红线，再稍微压一下画质
-            if len(image_bytes) > 3.8 * 1024 * 1024:
-                output = io.BytesIO()
-                img.save(output, format="JPEG", quality=65)
-                image_bytes = output.getvalue()
-        # ======================================
 
         url = "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic?access_token=" + access_token
         img_base64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -449,6 +433,16 @@ if "ocr_result_text" not in st.session_state:
 
 with tab1:
     st.markdown("### 第一步：批量上传病历图片")
+
+    # 👇 ================= 新增的代码段 ================= 👇
+    st.warning("""
+    **💡 上传图片最佳实践与要求（防乱码必读）：**
+    1. **最佳格式**：请直接上传电脑系统原图截图（推荐使用微信 `Alt+A` 截图保存）或高清扫描件。
+    2. **⚠️ 对屏拍照注意**：请**用手机直接拍摄电脑屏幕不要包含大量的波纹**！屏幕的摩尔纹会严重干扰 AI 识别，导致提取出火星文乱码。
+    3. **大小限制**：单张图片请尽量控制在 **4MB 以内**。
+    """)
+    # 👆 ============================================== 👆
+
     uploaded_files = st.file_uploader(
         "支持拍照上传多张化验单、出院小结等（按顺序多选即可）", 
         type=["png", "jpg", "jpeg"], 
@@ -524,4 +518,3 @@ with tab2:
                     )
             except Exception as e:
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
-
