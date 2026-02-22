@@ -29,20 +29,30 @@ def get_baidu_access_token():
 
 def perform_ocr(image_bytes, access_token):
     try:
-        # === 新增：医疗级全自动图片压缩逻辑 ===
-        # 如果图片大于 3MB (保险起见，阈值设为 3*1024*1024)
+        # === 优化版：防摩尔纹（屏幕翻拍专用）压缩逻辑 ===
+        # 如果图片大于 3MB，才进行压缩
         if len(image_bytes) > 3 * 1024 * 1024:
+            from PIL import Image
             img = Image.open(io.BytesIO(image_bytes))
-            # 确保图片格式为 RGB
             if img.mode != 'RGB':
                 img = img.convert('RGB')
-            # 缩放分辨率：最长边不超过 2000 像素，这完全不影响文字识别，但能极大减小体积
-            img.thumbnail((2000, 2000), Image.Resampling.LANCZOS)
+            
+            # 【关键修改】：把分辨率上限从 2000 提高到 3800！
+            # 屏幕翻拍图绝不能缩得太小，必须保留足够的像素让 OCR 区分文字和屏幕网格
+            max_size = 3800
+            if max(img.size) > max_size:
+                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            
             output = io.BytesIO()
-            # 以 75% 的质量保存为 JPEG，肉眼看不出画质损失
-            img.save(output, format="JPEG", quality=75)
-            # 替换原始的巨大二进制数据
+            # 以 85 的高画质保存，避免文字发虚
+            img.save(output, format="JPEG", quality=85)
             image_bytes = output.getvalue()
+            
+            # 【二次保险】：如果体积依然逼近百度的 4MB 红线，再稍微压一下画质
+            if len(image_bytes) > 3.8 * 1024 * 1024:
+                output = io.BytesIO()
+                img.save(output, format="JPEG", quality=65)
+                image_bytes = output.getvalue()
         # ======================================
 
         url = "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic?access_token=" + access_token
@@ -514,3 +524,4 @@ with tab2:
                     )
             except Exception as e:
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
+
