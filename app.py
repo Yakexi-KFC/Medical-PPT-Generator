@@ -13,9 +13,9 @@ from openai import OpenAI
 # ==========================================
 # 🔑 密钥配置区 (使用 Streamlit Secrets 保护)
 # ==========================================
-BAIDU_API_KEY = st.secrets["QfpFe95LYcIY5o1crrROWCi3"]
-BAIDU_SECRET_KEY = st.secrets["aSvE1enC3zrL7IKCAKABlszyvP7RXYTZ"]
-DEEPSEEK_API_KEY = st.secrets["sk-61e2d5846bd34ca5aa14f4fe92482f91"]
+BAIDU_API_KEY = st.secrets["BAIDU_API_KEY"]
+BAIDU_SECRET_KEY = st.secrets["BAIDU_SECRET_KEY"]
+DEEPSEEK_API_KEY = st.secrets["DEEPSEEK_API_KEY"]
 
 # ==========================================
 # 1. 百度 OCR 图片识别模块 (支持批量识别)
@@ -349,4 +349,5 @@ with tab2:
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                     )
             except Exception as e:
+
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
