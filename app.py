@@ -1,3 +1,4 @@
+from PIL import Image
 import streamlit as st
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -28,12 +29,29 @@ def get_baidu_access_token():
 
 def perform_ocr(image_bytes, access_token):
     try:
+        # === 新增：医疗级全自动图片压缩逻辑 ===
+        # 如果图片大于 3MB (保险起见，阈值设为 3*1024*1024)
+        if len(image_bytes) > 3 * 1024 * 1024:
+            img = Image.open(io.BytesIO(image_bytes))
+            # 确保图片格式为 RGB
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            # 缩放分辨率：最长边不超过 2000 像素，这完全不影响文字识别，但能极大减小体积
+            img.thumbnail((2000, 2000), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            # 以 75% 的质量保存为 JPEG，肉眼看不出画质损失
+            img.save(output, format="JPEG", quality=75)
+            # 替换原始的巨大二进制数据
+            image_bytes = output.getvalue()
+        # ======================================
+
         url = "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic?access_token=" + access_token
         img_base64 = base64.b64encode(image_bytes).decode('utf-8')
         payload = {'image': img_base64}
         headers = {'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'}
         response = requests.request("POST", url, headers=headers, data=payload)
         result_json = response.json()
+        
         if "words_result" in result_json:
             text_list = [item["words"] for item in result_json["words_result"]]
             return "\n".join(text_list)
