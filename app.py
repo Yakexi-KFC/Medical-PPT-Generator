@@ -43,7 +43,7 @@ def perform_ocr(image_bytes, access_token):
         return f"[请求异常: {str(e)}]"
 
 # ==========================================
-# 2. AI 结构化提取模块 (Timeline增强：包含线数phase)
+# 2. AI 结构化提取模块 (逻辑修正：严谨判定一线/辅助)
 # ==========================================
 def extract_complex_case(patient_text):
     client = OpenAI(
@@ -53,13 +53,14 @@ def extract_complex_case(patient_text):
     system_prompt = """
     你是一位极其严谨的肿瘤内科主任医师。请阅读用户提供的真实长篇病历，将其拆解为标准的病例汇报结构。
     
-    【核心指令 1：历史治疗 (严禁删减)】
-    - 完整保留原病历中的详细客观描述。特别是【放疗】、【手术】等局部治疗手段，绝对不允许遗漏！
-    - 严格的线数划分：明确记录PD后更改方案才算下一线；未PD仅调整药物算维持。新辅助/辅助治疗单独列出。
+    【核心指令 1：严谨的线数判定 (重点)】
+    - **非手术患者**：如果患者全程未进行根治性手术，其最初始的治疗**绝对属于【一线治疗】**，严禁标记为“新辅助”或“辅助治疗”。
+    - **手术患者**：只有明确记录了“行根治术”或“手术切除”的，术前才叫新辅助，术后才叫辅助。
+    - **晚期分线**：明确记录PD（进展/复发）后更改方案算下一线；未PD仅调整药物算维持。
     
-    【核心指令 2：本次入院转归 (允许智能整理)】
-    - 检验指标：请将散乱的化验结果整理为清晰的列表。
-    - 治疗计划：请对出院医嘱/计划进行【适度归纳总结】，分点列出。
+    【核心指令 2：内容完整性】
+    - 完整保留放疗、介入等局部治疗手段，严禁遗漏。
+    - 本次入院的检查结果整理为清晰列表。
     
     必须严格输出为以下 JSON 格式：
     {
@@ -72,9 +73,9 @@ def extract_complex_case(patient_text):
         },
         "treatments": [
             {
-                "phase": "推断的阶段（如：一线治疗 / 五线治疗 / 新辅助治疗）", 
+                "phase": "阶段名称（如：一线治疗 / 二线治疗 / 辅助治疗）", 
                 "duration": "具体时间段", 
-                "regimen": "【严禁遗漏】完整保留该阶段所有的全身用药及局部治疗原文", 
+                "regimen": "完整保留该阶段所有的全身用药及局部治疗原文", 
                 "imaging": "关键影像学评估结果原文保留",
                 "markers": "肿瘤标志物变化情况原文保留"
             }
@@ -87,14 +88,14 @@ def extract_complex_case(patient_text):
         "timeline_events": [
             {
                 "date": "年月", 
-                "phase": "核心字段：请注明阶段（如'一线'、'一线维持'、'二线'、'术后辅助'），若是评估节点则填'评估'",
+                "phase": "注明阶段（如'一线'、'二线'、'评估'）",
                 "event_type": "Treatment 或 Evaluation",
-                "event": "简短描述核心事件(限12字内，如'AG方案+PD-1'或'肝脏PD')"
+                "event": "简短描述核心事件(限12字内)"
             }
         ],
         "summary": ["总结点1", "总结点2"]
     }
-    注意：timeline_events 需提取全病程中最重要的换线节点、局部重大治疗和评估节点，按先后排序，最多不超过8个。
+    注意：timeline_events 需提取全病程中最重要的节点，按先后排序，最多不超过8个。
     """
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -107,18 +108,42 @@ def extract_complex_case(patient_text):
     return json.loads(response.choices[0].message.content)
 
 # ==========================================
-# 3. PPT 生成模块 (Timeline 布局算法重构)
+# 3. PPT 生成模块 (Timeline布局优化 + 逻辑清洗)
 # ==========================================
 class AdvancedPPTMaker:
     def __init__(self, data):
         self.prs = Presentation()
         self.prs.slide_width = Inches(13.333) 
         self.prs.slide_height = Inches(7.5)
-        self.data = data
         
-        # 中山一院紫红色 (Burgundy/Maroon) 主色调
+        # --- 逻辑清洗：防止AI由于惯性把非手术的初始治疗标为辅助 ---
+        self.data = self.clean_data(data)
+        
+        # 中山一院紫红色
         self.C_PRI = RGBColor(115, 21, 40)   
         self.C_ACC = RGBColor(0, 51, 102)  
+
+    def clean_data(self, data):
+        """清洗数据：如果没做手术，强制把'辅助/新辅助'改为'一线'"""
+        has_surgery = False
+        # 简单检查全文是否有手术相关字眼
+        full_text = json.dumps(data, ensure_ascii=False)
+        if "根治术" in full_text or "切除术" in full_text or "手术切除" in full_text:
+            has_surgery = True
+            
+        if not has_surgery:
+            for tx in data.get("treatments", []):
+                p = tx.get("phase", "")
+                if "辅助" in p:
+                    tx["phase"] = "一线治疗"  # 强制修正
+            
+            # 同步修正 timeline 里的标签
+            for evt in data.get("timeline_events", []):
+                p = evt.get("phase", "")
+                if "辅助" in p:
+                    evt["phase"] = "一线"
+                    
+        return data
 
     def add_header(self, slide, text):
         shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, Inches(13.33), Inches(0.9))
@@ -164,8 +189,14 @@ class AdvancedPPTMaker:
         
     def make_treatments(self):
         for tx in self.data.get("treatments", []):
+            phase_name = tx.get('phase', '阶段治疗')
+            
+            # 双重保险：如果到了这一步还是辅助，且内容很少，就不生成这一页
+            if "辅助" in phase_name and len(tx.get('regimen', '')) < 5:
+                continue
+
             slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
-            self.add_header(slide, f"治疗经过：{tx.get('phase', '阶段治疗')}")
+            self.add_header(slide, f"治疗经过：{phase_name}")
             tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
             tf = tb.text_frame
             tf.word_wrap = True 
@@ -205,7 +236,6 @@ class AdvancedPPTMaker:
         is_split = len(plan_str) > 200 or total_len > 500
         
         if is_split:
-            # 第一页：评估
             slide1 = self.prs.slides.add_slide(self.prs.slide_layouts[6])
             self.add_header(slide1, "本次入院评估 (1/2)")
             tb1 = slide1.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(5.5))
@@ -228,7 +258,6 @@ class AdvancedPPTMaker:
             p_im_body.text = imaging_str
             p_im_body.font.size = Pt(18)
             
-            # 第二页：计划
             slide2 = self.prs.slides.add_slide(self.prs.slide_layouts[6])
             self.add_header(slide2, "后续治疗与随访计划 (2/2)")
             tb2 = slide2.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(5.5))
@@ -243,7 +272,6 @@ class AdvancedPPTMaker:
             p_pl_body.text = plan_str
             p_pl_body.font.size = Pt(18)
         else:
-            # 合并页
             slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
             self.add_header(slide, "本次入院评估及计划 (转归)")
             tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
@@ -255,20 +283,18 @@ class AdvancedPPTMaker:
             p.font.size = Pt(16)
 
     def make_timeline(self):
-        """升级版时间轴：两端对齐 + 动态缩放 + 显示治疗线数"""
+        """Timeline 布局算法：两端对齐 + 动态缩放"""
         events = self.data.get("timeline_events", [])
         if not events: return
         
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self.add_header(slide, "全病程时间轴概览 (Timeline)")
         
-        # 布局参数
         line_y = Inches(4.2)
         start_x = Inches(1.0)
-        total_width = 11.5 # 时间轴总长度
-        count = min(len(events), 8) # 最多显示8个
+        total_width = 11.5 
+        count = min(len(events), 8) 
         
-        # 动态调整卡片大小 (节点越多，卡片越窄，字越小)
         if count > 6:
             card_width = Inches(1.3)
             card_height = Inches(1.1)
@@ -280,24 +306,21 @@ class AdvancedPPTMaker:
             font_size_date = Pt(12)
             font_size_body = Pt(11)
 
-        # 绘制主轴线
         main_line = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, start_x - Inches(0.2), line_y - Inches(0.05), Inches(total_width + 0.5), Inches(0.1))
         main_line.fill.solid()
         main_line.fill.fore_color.rgb = RGBColor(220, 220, 220) 
         main_line.line.fill.background()
         
         for i, evt in enumerate(events[:8]): 
-            # 核心算法修改：使用 (i / (count - 1)) 实现两端对齐，均匀铺满
             if count > 1:
                 x = start_x + Inches(total_width * (i / (count - 1)))
             else:
-                x = start_x + Inches(total_width / 2) # 只有一个点居中
+                x = start_x + Inches(total_width / 2)
 
             event_text = evt.get("event", "")
-            phase_text = evt.get("phase", "") # 新增：线数标签
+            phase_text = evt.get("phase", "") 
             event_type = evt.get("event_type", "Treatment")
             
-            # 颜色逻辑
             is_pd = "进展" in event_text or "PD" in event_text.upper() or "复发" in event_text
             is_control = "PR" in event_text.upper() or "SD" in event_text.upper() or "缩小" in event_text
             
@@ -308,24 +331,20 @@ class AdvancedPPTMaker:
             else:
                 node_color = self.C_PRI 
             
-            # 连接线
             stem_top = line_y - Inches(1.2) if i % 2 == 0 else line_y
             stem_height = Inches(1.2)
-            stem = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, stem_top, Inches(0.03), stem_height) # 微调宽度
+            stem = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, stem_top, Inches(0.03), stem_height) 
             stem.fill.solid()
             stem.fill.fore_color.rgb = node_color
             stem.line.fill.background()
             
-            # 圆点
             circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, x - Inches(0.15), line_y - Inches(0.15), Inches(0.3), Inches(0.3))
             circle.fill.solid()
             circle.fill.fore_color.rgb = node_color
             circle.line.color.rgb = RGBColor(255, 255, 255) 
             circle.line.width = Pt(2)
             
-            # 文本卡片
             card_top = line_y - Inches(2.4) if i % 2 == 0 else line_y + Inches(1.2)
-            # 计算卡片居中位置：x 是中心点，减去一半宽度
             card_x = x - (card_width / 2)
             card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, card_x, card_top, card_width, card_height)
             card.fill.solid()
@@ -339,7 +358,6 @@ class AdvancedPPTMaker:
             tf.margin_right = Inches(0.05)
             tf.margin_top = Inches(0.05)
             
-            # 1. 日期
             p0 = tf.paragraphs[0]
             p0.text = evt.get("date", "")
             p0.font.bold = True
@@ -347,7 +365,6 @@ class AdvancedPPTMaker:
             p0.font.color.rgb = node_color
             p0.alignment = PP_ALIGN.CENTER
             
-            # 2. 线数标签 (粗体，显眼)
             if phase_text and phase_text != "评估":
                 p_phase = tf.add_paragraph()
                 p_phase.text = f"【{phase_text}】"
@@ -360,10 +377,9 @@ class AdvancedPPTMaker:
                 p_phase.text = "【疗效评估】"
                 p_phase.font.size = font_size_body
                 p_phase.font.bold = True
-                p_phase.font.color.rgb = node_color # 绿色或红色
+                p_phase.font.color.rgb = node_color 
                 p_phase.alignment = PP_ALIGN.CENTER
 
-            # 3. 具体方案/结果
             p1 = tf.add_paragraph()
             p1.text = event_text
             p1.font.size = font_size_body
