@@ -43,7 +43,7 @@ def perform_ocr(image_bytes, access_token):
         return f"[请求异常: {str(e)}]"
 
 # ==========================================
-# 2. AI 结构化提取模块 (终极逻辑版：精准分线 + 涵盖转归)
+# 2. AI 结构化提取模块 (转归部分结构化增强)
 # ==========================================
 def extract_complex_case(patient_text):
     client = OpenAI(
@@ -53,12 +53,13 @@ def extract_complex_case(patient_text):
     system_prompt = """
     你是一位极其严谨的肿瘤内科主任医师。请阅读用户提供的真实长篇病历，将其拆解为标准的病例汇报结构。
     
-    【核心指令与肿瘤内科铁律 - 极其重要，严禁漏字】：
-    1. 零删减原则：完整保留原病历中的详细客观描述。特别是【放疗】、【手术】、【介入微创】等局部治疗手段，绝对不允许遗漏！
-    2. 严格的阶段与线数划分铁律：
-       - 【围手术期】：明确识别并标注【新辅助治疗】或【辅助治疗】，它们不计入晚期解救治疗的线数。
-       - 【晚期解救】：只要明确记录了【疾病进展（PD）】或【复发】，无论后续是“彻底换药”、“在原方案基础上加药(如加靶向)”还是“原方案跨线再挑战”，都必须判定为开启了全新的一线（如三线、四线、五线治疗）。
-       - 【维持治疗】：若未进展而更改/停用部分药物，必须判定为【同一线的维持治疗】。
+    【核心指令 1：历史治疗 (严禁删减)】
+    - 完整保留原病历中的详细客观描述。特别是【放疗】、【手术】等局部治疗手段，绝对不允许遗漏！
+    - 严格的线数划分：明确记录PD后更改方案才算下一线；未PD仅调整药物算维持。新辅助/辅助治疗单独列出。
+    
+    【核心指令 2：本次入院转归 (允许智能整理)】
+    - 检验指标：请将散乱的化验结果整理为清晰的列表（如：['CA19-9: 10815 U/mL ↑', 'Hb: 102 g/L ↓']）。
+    - 治疗计划：请对出院医嘱/计划进行【适度归纳总结】。去除冗余的客套话（如“如有不适随诊”），保留具体的药物用法用量（如“安罗替尼 10mg d1-14”）、具体的复查时间节点、关键的护理措施（如“升白方案”）。分点输出。
     
     必须严格输出为以下 JSON 格式：
     {
@@ -71,28 +72,27 @@ def extract_complex_case(patient_text):
         },
         "treatments": [
             {
-                "phase": "遵守铁律推断的阶段（如：新辅助治疗 / 辅助治疗 / 一线治疗 / 二线治疗 / 五线治疗 等）", 
+                "phase": "推断的阶段（如：一线治疗 / 五线治疗 / 新辅助治疗）", 
                 "duration": "具体时间段", 
                 "regimen": "【严禁遗漏】完整保留该阶段所有的全身用药及局部治疗原文", 
-                "imaging": "关键影像学评估结果原文保留（注定PR, SD或PD）",
+                "imaging": "关键影像学评估结果原文保留",
                 "markers": "肿瘤标志物变化情况原文保留"
             }
         ],
         "current_admission": {
-            "exams": "单独提取【本次入院】或【最近一次随访】的异常检验指标原文（如升高的肿瘤标志物、异常的血常规/生化等）",
-            "imaging": "单独提取【本次入院】的影像学评估结论原文",
-            "plan": "提取目前的当前治疗方案、对症支持治疗以及后续的【随访计划/转归】原文"
+            "exams": ["检验指标1", "检验指标2 (请分条列出，不要挤在一起)"],
+            "imaging": "本次影像学评估结论原文",
+            "plan": ["治疗计划1", "治疗计划2 (请归纳为短句，分点列出)"]
         },
         "timeline_events": [
             {
                 "date": "年月", 
-                "event_type": "填 'Treatment' 或 'Evaluation'",
-                "event": "Treatment填方案(如'五线:四药联合'或'局部放疗')；Evaluation填疗效(如'PD'或'SD')"
+                "event_type": "Treatment 或 Evaluation",
+                "event": "Treatment填方案；Evaluation填疗效(如PD/SD)"
             }
         ],
-        "summary": ["基于原文提炼的治疗亮点总结1", "基于原文提炼的治疗亮点总结2"]
+        "summary": ["总结点1", "总结点2"]
     }
-    注意：timeline_events 需提取全病程中最重要的换线节点、局部重大治疗和评估节点，按先后排序，最多不超过8个。
     """
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -105,7 +105,7 @@ def extract_complex_case(patient_text):
     return json.loads(response.choices[0].message.content)
 
 # ==========================================
-# 3. PPT 生成模块 (新增"本次入院与转归"页面)
+# 3. PPT 生成模块 (支持智能分页与列表排版)
 # ==========================================
 class AdvancedPPTMaker:
     def __init__(self, data):
@@ -189,26 +189,87 @@ class AdvancedPPTMaker:
             p4.font.color.rgb = self.C_ACC
 
     def make_current_admission(self):
-        """新增：本次入院评估及后续治疗计划"""
+        """新增：智能分页的转归页面"""
         adm_data = self.data.get("current_admission")
-        if not adm_data or not any(adm_data.values()): 
-            return # 如果这部分为空则跳过
-            
-        slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
-        self.add_header(slide, "本次入院评估及后续计划 (转归)")
+        if not adm_data: return
         
-        content = f"【本次入院检验指标】\n{adm_data.get('exams', '')}\n\n" \
-                  f"【本次影像学评估】\n{adm_data.get('imaging', '')}\n\n" \
-                  f"【当前治疗与后续随访计划】\n{adm_data.get('plan', '')}"
-                  
-        tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
-        tf = tb.text_frame
-        tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = content
-        p.font.size = Pt(18)
-        # 将关键字标红高亮（可选的简单排版优化）
-        p.font.color.rgb = RGBColor(30, 30, 30)
+        # 1. 整理数据
+        exams_list = adm_data.get("exams", [])
+        exams_str = "\n".join([f"• {item}" for item in exams_list]) if isinstance(exams_list, list) else str(exams_list)
+        
+        imaging_str = adm_data.get("imaging", "")
+        
+        plan_list = adm_data.get("plan", [])
+        plan_str = "\n".join([f"• {item}" for item in plan_list]) if isinstance(plan_list, list) else str(plan_list)
+        
+        # 2. 判断内容长度，决定是一页还是两页
+        # 粗略估算：如果计划部分字数超过 150 字，或者总字数太多，就拆分
+        total_len = len(exams_str) + len(imaging_str) + len(plan_str)
+        is_split = len(plan_str) > 200 or total_len > 500
+        
+        if is_split:
+            # === 第一页：评估 ===
+            slide1 = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+            self.add_header(slide1, "本次入院评估 (1/2)")
+            
+            tb1 = slide1.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(5.5))
+            tf1 = tb1.text_frame
+            tf1.word_wrap = True
+            
+            p_ex_title = tf1.paragraphs[0]
+            p_ex_title.text = "【入院检验指标】"
+            p_ex_title.font.bold = True
+            p_ex_title.font.size = Pt(20)
+            p_ex_title.font.color.rgb = self.C_PRI
+            
+            p_ex_body = tf1.add_paragraph()
+            p_ex_body.text = exams_str + "\n"
+            p_ex_body.font.size = Pt(18)
+            
+            p_im_title = tf1.add_paragraph()
+            p_im_title.text = "【影像学评估】"
+            p_im_title.font.bold = True
+            p_im_title.font.size = Pt(20)
+            p_im_title.font.color.rgb = self.C_PRI
+            
+            p_im_body = tf1.add_paragraph()
+            p_im_body.text = imaging_str
+            p_im_body.font.size = Pt(18)
+            
+            # === 第二页：计划 ===
+            slide2 = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+            self.add_header(slide2, "后续治疗与随访计划 (2/2)")
+            
+            tb2 = slide2.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(5.5))
+            tf2 = tb2.text_frame
+            tf2.word_wrap = True
+            
+            p_pl_title = tf2.paragraphs[0]
+            p_pl_title.text = "【治疗与随访计划】"
+            p_pl_title.font.bold = True
+            p_pl_title.font.size = Pt(20)
+            p_pl_title.font.color.rgb = self.C_PRI
+            
+            p_pl_body = tf2.add_paragraph()
+            p_pl_body.text = plan_str
+            p_pl_body.font.size = Pt(18)
+            
+        else:
+            # === 内容较少，合并在一页 ===
+            slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
+            self.add_header(slide, "本次入院评估及计划 (转归)")
+            
+            tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
+            tf = tb.text_frame
+            tf.word_wrap = True
+            
+            content = f"【入院检验指标】\n{exams_str}\n\n" \
+                      f"【影像学评估】\n{imaging_str}\n\n" \
+                      f"【后续计划】\n{plan_str}"
+            
+            p = tf.paragraphs[0]
+            p.text = content
+            p.font.size = Pt(16) # 字号稍小以容纳全部
 
     def make_timeline(self):
         events = self.data.get("timeline_events", [])
@@ -299,7 +360,7 @@ class AdvancedPPTMaker:
         self.make_cover()
         self.make_baseline()
         self.make_treatments()
-        # 新增的调用：插入转归页面
+        # 新增的调用：插入转归页面 (自动判断是否分页)
         self.make_current_admission()
         self.make_timeline()
         self.make_summary()
