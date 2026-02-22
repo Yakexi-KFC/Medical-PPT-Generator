@@ -43,7 +43,7 @@ def perform_ocr(image_bytes, access_token):
         return f"[请求异常: {str(e)}]"
 
 # ==========================================
-# 2. AI 结构化提取模块 (转归部分结构化增强)
+# 2. AI 结构化提取模块 (Timeline增强：包含线数phase)
 # ==========================================
 def extract_complex_case(patient_text):
     client = OpenAI(
@@ -58,8 +58,8 @@ def extract_complex_case(patient_text):
     - 严格的线数划分：明确记录PD后更改方案才算下一线；未PD仅调整药物算维持。新辅助/辅助治疗单独列出。
     
     【核心指令 2：本次入院转归 (允许智能整理)】
-    - 检验指标：请将散乱的化验结果整理为清晰的列表（如：['CA19-9: 10815 U/mL ↑', 'Hb: 102 g/L ↓']）。
-    - 治疗计划：请对出院医嘱/计划进行【适度归纳总结】。去除冗余的客套话（如“如有不适随诊”），保留具体的药物用法用量（如“安罗替尼 10mg d1-14”）、具体的复查时间节点、关键的护理措施（如“升白方案”）。分点输出。
+    - 检验指标：请将散乱的化验结果整理为清晰的列表。
+    - 治疗计划：请对出院医嘱/计划进行【适度归纳总结】，分点列出。
     
     必须严格输出为以下 JSON 格式：
     {
@@ -80,19 +80,21 @@ def extract_complex_case(patient_text):
             }
         ],
         "current_admission": {
-            "exams": ["检验指标1", "检验指标2 (请分条列出，不要挤在一起)"],
+            "exams": ["检验指标1", "检验指标2"],
             "imaging": "本次影像学评估结论原文",
-            "plan": ["治疗计划1", "治疗计划2 (请归纳为短句，分点列出)"]
+            "plan": ["治疗计划1", "治疗计划2"]
         },
         "timeline_events": [
             {
                 "date": "年月", 
+                "phase": "核心字段：请注明阶段（如'一线'、'一线维持'、'二线'、'术后辅助'），若是评估节点则填'评估'",
                 "event_type": "Treatment 或 Evaluation",
-                "event": "Treatment填方案；Evaluation填疗效(如PD/SD)"
+                "event": "简短描述核心事件(限12字内，如'AG方案+PD-1'或'肝脏PD')"
             }
         ],
         "summary": ["总结点1", "总结点2"]
     }
+    注意：timeline_events 需提取全病程中最重要的换线节点、局部重大治疗和评估节点，按先后排序，最多不超过8个。
     """
     response = client.chat.completions.create(
         model="deepseek-chat",
@@ -105,7 +107,7 @@ def extract_complex_case(patient_text):
     return json.loads(response.choices[0].message.content)
 
 # ==========================================
-# 3. PPT 生成模块 (支持智能分页与列表排版)
+# 3. PPT 生成模块 (Timeline 布局算法重构)
 # ==========================================
 class AdvancedPPTMaker:
     def __init__(self, data):
@@ -189,108 +191,113 @@ class AdvancedPPTMaker:
             p4.font.color.rgb = self.C_ACC
 
     def make_current_admission(self):
-        """新增：智能分页的转归页面"""
+        """智能分页的转归页面"""
         adm_data = self.data.get("current_admission")
         if not adm_data: return
         
-        # 1. 整理数据
         exams_list = adm_data.get("exams", [])
         exams_str = "\n".join([f"• {item}" for item in exams_list]) if isinstance(exams_list, list) else str(exams_list)
-        
         imaging_str = adm_data.get("imaging", "")
-        
         plan_list = adm_data.get("plan", [])
         plan_str = "\n".join([f"• {item}" for item in plan_list]) if isinstance(plan_list, list) else str(plan_list)
         
-        # 2. 判断内容长度，决定是一页还是两页
-        # 粗略估算：如果计划部分字数超过 150 字，或者总字数太多，就拆分
         total_len = len(exams_str) + len(imaging_str) + len(plan_str)
         is_split = len(plan_str) > 200 or total_len > 500
         
         if is_split:
-            # === 第一页：评估 ===
+            # 第一页：评估
             slide1 = self.prs.slides.add_slide(self.prs.slide_layouts[6])
             self.add_header(slide1, "本次入院评估 (1/2)")
-            
             tb1 = slide1.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(5.5))
             tf1 = tb1.text_frame
             tf1.word_wrap = True
-            
             p_ex_title = tf1.paragraphs[0]
             p_ex_title.text = "【入院检验指标】"
             p_ex_title.font.bold = True
             p_ex_title.font.size = Pt(20)
             p_ex_title.font.color.rgb = self.C_PRI
-            
             p_ex_body = tf1.add_paragraph()
             p_ex_body.text = exams_str + "\n"
             p_ex_body.font.size = Pt(18)
-            
             p_im_title = tf1.add_paragraph()
             p_im_title.text = "【影像学评估】"
             p_im_title.font.bold = True
             p_im_title.font.size = Pt(20)
             p_im_title.font.color.rgb = self.C_PRI
-            
             p_im_body = tf1.add_paragraph()
             p_im_body.text = imaging_str
             p_im_body.font.size = Pt(18)
             
-            # === 第二页：计划 ===
+            # 第二页：计划
             slide2 = self.prs.slides.add_slide(self.prs.slide_layouts[6])
             self.add_header(slide2, "后续治疗与随访计划 (2/2)")
-            
             tb2 = slide2.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(5.5))
             tf2 = tb2.text_frame
             tf2.word_wrap = True
-            
             p_pl_title = tf2.paragraphs[0]
             p_pl_title.text = "【治疗与随访计划】"
             p_pl_title.font.bold = True
             p_pl_title.font.size = Pt(20)
             p_pl_title.font.color.rgb = self.C_PRI
-            
             p_pl_body = tf2.add_paragraph()
             p_pl_body.text = plan_str
             p_pl_body.font.size = Pt(18)
-            
         else:
-            # === 内容较少，合并在一页 ===
+            # 合并页
             slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
             self.add_header(slide, "本次入院评估及计划 (转归)")
-            
             tb = slide.shapes.add_textbox(Inches(0.8), Inches(1.2), Inches(11.5), Inches(6))
             tf = tb.text_frame
             tf.word_wrap = True
-            
-            content = f"【入院检验指标】\n{exams_str}\n\n" \
-                      f"【影像学评估】\n{imaging_str}\n\n" \
-                      f"【后续计划】\n{plan_str}"
-            
+            content = f"【入院检验指标】\n{exams_str}\n\n【影像学评估】\n{imaging_str}\n\n【后续计划】\n{plan_str}"
             p = tf.paragraphs[0]
             p.text = content
-            p.font.size = Pt(16) # 字号稍小以容纳全部
+            p.font.size = Pt(16)
 
     def make_timeline(self):
+        """升级版时间轴：两端对齐 + 动态缩放 + 显示治疗线数"""
         events = self.data.get("timeline_events", [])
         if not events: return
+        
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self.add_header(slide, "全病程时间轴概览 (Timeline)")
         
+        # 布局参数
         line_y = Inches(4.2)
-        main_line = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, Inches(0.5), line_y - Inches(0.05), Inches(12.3), Inches(0.1))
+        start_x = Inches(1.0)
+        total_width = 11.5 # 时间轴总长度
+        count = min(len(events), 8) # 最多显示8个
+        
+        # 动态调整卡片大小 (节点越多，卡片越窄，字越小)
+        if count > 6:
+            card_width = Inches(1.3)
+            card_height = Inches(1.1)
+            font_size_date = Pt(10)
+            font_size_body = Pt(9)
+        else:
+            card_width = Inches(1.6)
+            card_height = Inches(1.2)
+            font_size_date = Pt(12)
+            font_size_body = Pt(11)
+
+        # 绘制主轴线
+        main_line = slide.shapes.add_shape(MSO_SHAPE.RIGHT_ARROW, start_x - Inches(0.2), line_y - Inches(0.05), Inches(total_width + 0.5), Inches(0.1))
         main_line.fill.solid()
         main_line.fill.fore_color.rgb = RGBColor(220, 220, 220) 
         main_line.line.fill.background()
         
-        start_x = Inches(1.0)
-        interval = Inches(11.0 / max(len(events), 1)) 
-        
         for i, evt in enumerate(events[:8]): 
-            x = start_x + (i * interval)
+            # 核心算法修改：使用 (i / (count - 1)) 实现两端对齐，均匀铺满
+            if count > 1:
+                x = start_x + Inches(total_width * (i / (count - 1)))
+            else:
+                x = start_x + Inches(total_width / 2) # 只有一个点居中
+
             event_text = evt.get("event", "")
+            phase_text = evt.get("phase", "") # 新增：线数标签
             event_type = evt.get("event_type", "Treatment")
             
+            # 颜色逻辑
             is_pd = "进展" in event_text or "PD" in event_text.upper() or "复发" in event_text
             is_control = "PR" in event_text.upper() or "SD" in event_text.upper() or "缩小" in event_text
             
@@ -301,21 +308,26 @@ class AdvancedPPTMaker:
             else:
                 node_color = self.C_PRI 
             
+            # 连接线
             stem_top = line_y - Inches(1.2) if i % 2 == 0 else line_y
             stem_height = Inches(1.2)
-            stem = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x + Inches(0.13), stem_top, Inches(0.04), stem_height)
+            stem = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, stem_top, Inches(0.03), stem_height) # 微调宽度
             stem.fill.solid()
             stem.fill.fore_color.rgb = node_color
             stem.line.fill.background()
             
-            circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, x, line_y - Inches(0.15), Inches(0.3), Inches(0.3))
+            # 圆点
+            circle = slide.shapes.add_shape(MSO_SHAPE.OVAL, x - Inches(0.15), line_y - Inches(0.15), Inches(0.3), Inches(0.3))
             circle.fill.solid()
             circle.fill.fore_color.rgb = node_color
             circle.line.color.rgb = RGBColor(255, 255, 255) 
             circle.line.width = Pt(2)
             
+            # 文本卡片
             card_top = line_y - Inches(2.4) if i % 2 == 0 else line_y + Inches(1.2)
-            card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x - Inches(0.7), card_top, Inches(1.6), Inches(1.2))
+            # 计算卡片居中位置：x 是中心点，减去一半宽度
+            card_x = x - (card_width / 2)
+            card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, card_x, card_top, card_width, card_height)
             card.fill.solid()
             card.fill.fore_color.rgb = RGBColor(250, 250, 250) 
             card.line.color.rgb = node_color 
@@ -323,24 +335,38 @@ class AdvancedPPTMaker:
             
             tf = card.text_frame
             tf.word_wrap = True
+            tf.margin_left = Inches(0.05)
+            tf.margin_right = Inches(0.05)
+            tf.margin_top = Inches(0.05)
             
+            # 1. 日期
             p0 = tf.paragraphs[0]
             p0.text = evt.get("date", "")
             p0.font.bold = True
-            p0.font.size = Pt(11)
+            p0.font.size = font_size_date
             p0.font.color.rgb = node_color
             p0.alignment = PP_ALIGN.CENTER
             
-            p_tag = tf.add_paragraph()
-            p_tag.text = "【评估】" if event_type == "Evaluation" else "【方案】"
-            p_tag.font.size = Pt(9)
-            p_tag.font.bold = True
-            p_tag.font.color.rgb = node_color
-            p_tag.alignment = PP_ALIGN.CENTER
-            
+            # 2. 线数标签 (粗体，显眼)
+            if phase_text and phase_text != "评估":
+                p_phase = tf.add_paragraph()
+                p_phase.text = f"【{phase_text}】"
+                p_phase.font.size = font_size_body
+                p_phase.font.bold = True
+                p_phase.font.color.rgb = node_color
+                p_phase.alignment = PP_ALIGN.CENTER
+            elif event_type == "Evaluation":
+                p_phase = tf.add_paragraph()
+                p_phase.text = "【疗效评估】"
+                p_phase.font.size = font_size_body
+                p_phase.font.bold = True
+                p_phase.font.color.rgb = node_color # 绿色或红色
+                p_phase.alignment = PP_ALIGN.CENTER
+
+            # 3. 具体方案/结果
             p1 = tf.add_paragraph()
             p1.text = event_text
-            p1.font.size = Pt(10)
+            p1.font.size = font_size_body
             p1.font.color.rgb = RGBColor(30, 30, 30)
             p1.alignment = PP_ALIGN.CENTER
 
@@ -360,7 +386,6 @@ class AdvancedPPTMaker:
         self.make_cover()
         self.make_baseline()
         self.make_treatments()
-        # 新增的调用：插入转归页面 (自动判断是否分页)
         self.make_current_admission()
         self.make_timeline()
         self.make_summary()
@@ -424,9 +449,9 @@ with tab1:
                     ppt_file = maker.build()
                 st.success("✅ 专业版病例幻灯片已生成就绪！")
                 st.download_button(
-                    label="📥 立即下载 PPT (含转归与全细节保留)",
+                    label="📥 立即下载 PPT (含Timeline优化版)",
                     data=ppt_file,
-                    file_name="病例汇报_多图连拍版.pptx",
+                    file_name="病例汇报_Pro版.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                 )
             except Exception as e:
@@ -452,7 +477,7 @@ with tab2:
                         st.json(case_json)
                 with col2:
                     st.download_button(
-                        label="📥 立即下载 PPT (含转归)",
+                        label="📥 立即下载 PPT",
                         data=ppt_file,
                         file_name="病例汇报_文本版.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
