@@ -1,4 +1,3 @@
-from PIL import Image
 import streamlit as st
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -10,6 +9,7 @@ import json
 import base64
 import requests
 from openai import OpenAI
+from PIL import Image  # 用于处理超大图片压缩
 
 # ==========================================
 # 🔑 密钥配置区 (使用 Streamlit Secrets 保护)
@@ -19,7 +19,7 @@ BAIDU_SECRET_KEY = st.secrets["BAIDU_SECRET_KEY"]
 DEEPSEEK_API_KEY = st.secrets["DEEPSEEK_API_KEY"]
 
 # ==========================================
-# 1. 百度 OCR 图片识别模块
+# 1. 百度 OCR 图片识别模块 (包含超大图防崩溃压缩)
 # ==========================================
 def get_baidu_access_token():
     url = f"https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={BAIDU_API_KEY}&client_secret={BAIDU_SECRET_KEY}"
@@ -31,12 +31,12 @@ def perform_ocr(image_bytes, access_token):
     try:
         # 基础防崩溃压缩：仅当图片真的大于 3.5MB 时，才做轻微的体积压缩
         if len(image_bytes) > 3.5 * 1024 * 1024:
-            from PIL import Image
             img = Image.open(io.BytesIO(image_bytes))
             if img.mode != 'RGB':
                 img = img.convert('RGB')
             output = io.BytesIO()
-            img.save(output, format="JPEG", quality=70) # 仅降低一点保存质量
+            # 仅降低一点保存质量，不改变长宽，防止摩尔纹扭曲
+            img.save(output, format="JPEG", quality=70) 
             image_bytes = output.getvalue()
 
         url = "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic?access_token=" + access_token
@@ -55,7 +55,7 @@ def perform_ocr(image_bytes, access_token):
         return f"[请求异常: {str(e)}]"
 
 # ==========================================
-# 2. AI 结构化提取模块 (升级：学术级深度总结)
+# 2. AI 结构化提取模块 (学术级深度总结 + 严谨分线)
 # ==========================================
 def extract_complex_case(patient_text):
     client = OpenAI(
@@ -65,16 +65,14 @@ def extract_complex_case(patient_text):
     system_prompt = """
     你是一位极其严谨的肿瘤内科主任医师，正在准备一场高水平的学术会议病例汇报。
     
-    【核心任务】：不仅要提取病史，更要进行【深度临床总结与思考】。
-    
     【指令 1：严谨的治疗线数判定】
     - **非手术患者**：初始治疗绝对属于【一线治疗】，严禁标记为辅助。
     - **同线判定**：未PD（进展）时的维持治疗或加药调整，属于同一线。明确PD后换方案才算下一线。
-    - **完整性**：必须完整保留放疗、介入及具体的用药方案原文。
+    - **完整性**：必须完整保留放疗、介入及具体的用药方案原文（包含前期的化疗和后期的维持/加药）。
     
     【指令 2：深度总结与思考 (Target: Professor Level)】
-    - 不要只复述病史。请计算患者的总生存期（OS），评价其治疗效果（如“长期带瘤生存”）。
-    - 总结治疗策略的亮点（如“多靶点TKI跨线使用”、“免疫联合化疗的耐受性”）。
+    - 不要只复述病史。请计算患者的总生存期（OS），评价其治疗效果。
+    - 总结治疗策略的亮点（如“多靶点TKI跨线使用”、“免疫联合化疗”）。
     - 敏锐捕捉临床矛盾点（如“肿瘤标志物飙升但影像学SD”），并据此提出具有探讨价值的临床问题。
     
     必须严格输出为以下 JSON 格式：
@@ -110,13 +108,11 @@ def extract_complex_case(patient_text):
         ],
         "summary": {
             "highlights": [
-                "亮点1：如'高龄患者(71岁)：长期带瘤生存(OS > 3年)'", 
-                "亮点2：如'治疗手段丰富：涵盖化疗、放疗、免疫及多靶点TKI'",
-                "亮点3：如'标志物与影像分离：CA19-9持续飙升但影像学SD'"
+                "亮点1：如'高龄患者：长期带瘤生存(OS > 3年)'", 
+                "亮点2：如'标志物与影像分离：CA19-9持续飙升但影像学SD'"
             ],
             "discussion": [
-                "思考1：如'在标志物升高而影像学SD的情况下，是否应更积极更换方案？'",
-                "思考2：如'四药联合在高龄患者中的耐受性管理策略'"
+                "思考1：如'在标志物升高而影像学SD的情况下，是否应更积极更换方案？'"
             ]
         }
     }
@@ -132,6 +128,9 @@ def extract_complex_case(patient_text):
     )
     return json.loads(response.choices[0].message.content)
 
+# ==========================================
+# 3. 网页端 Markdown 逻辑流生成器 (备用Cheat Sheet)
+# ==========================================
 def render_logic_line_markdown(data):
     """将 JSON 转化为一目了然的 Markdown 病例逻辑流"""
     lines = []
@@ -160,17 +159,14 @@ def render_logic_line_markdown(data):
     return "\n".join(lines)
 
 # ==========================================
-# 3. PPT 生成模块 (升级：复刻参考图的总结页布局)
+# 4. PPT 生成模块
 # ==========================================
 class AdvancedPPTMaker:
     def __init__(self, data):
         self.prs = Presentation()
         self.prs.slide_width = Inches(13.333) 
         self.prs.slide_height = Inches(7.5)
-        
         self.data = self.clean_data(data)
-        
-        # 中山一院紫红色
         self.C_PRI = RGBColor(115, 21, 40)   
         self.C_ACC = RGBColor(0, 51, 102)  
 
@@ -381,12 +377,9 @@ class AdvancedPPTMaker:
             p1.font.size = font_size_body; p1.font.color.rgb = RGBColor(30, 30, 30); p1.alignment = PP_ALIGN.CENTER
 
     def make_summary(self):
-        """深度总结页：模仿参考图布局，分为上下两部分"""
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[6])
         self.add_header(slide, "病例思考与总结")
         summary_data = self.data.get("summary", {})
-        
-        # 兼容性处理：如果返回的是旧版List，转为dict
         highlights = []
         discussion = []
         if isinstance(summary_data, list):
@@ -395,7 +388,6 @@ class AdvancedPPTMaker:
             highlights = summary_data.get("highlights", [])
             discussion = summary_data.get("discussion", [])
 
-        # 1. 上半部分：病例亮点
         top_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.3), Inches(11.5), Inches(3.0))
         tf_top = top_box.text_frame
         tf_top.word_wrap = True
@@ -403,23 +395,19 @@ class AdvancedPPTMaker:
         for item in highlights:
             p = tf_top.add_paragraph()
             p.text = f"• {item}"
-            p.font.size = Pt(22) # 大号字体
+            p.font.size = Pt(22) 
             p.font.bold = True
             p.space_after = Pt(18)
             
-        # 2. 中间分割线 (类似参考图的红线)
         line = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0.8), Inches(4.3), Inches(11.5), Inches(0.03))
         line.fill.solid()
-        line.fill.fore_color.rgb = self.C_PRI # 紫红色分割线
+        line.fill.fore_color.rgb = self.C_PRI 
         line.line.fill.background()
 
-        # 3. 下半部分：思考与讨论
         if discussion:
             bottom_box = slide.shapes.add_textbox(Inches(0.8), Inches(4.5), Inches(11.5), Inches(2.8))
             tf_bottom = bottom_box.text_frame
             tf_bottom.word_wrap = True
-            
-            # 标题：思考
             p_title = tf_bottom.paragraphs[0]
             p_title.text = "思考："
             p_title.font.size = Pt(22)
@@ -427,10 +415,9 @@ class AdvancedPPTMaker:
             p_title.font.color.rgb = RGBColor(0, 0, 0)
             p_title.space_after = Pt(12)
             
-            # 内容
             for item in discussion:
                 p = tf_bottom.add_paragraph()
-                p.text = f"➤ {item}" # 使用箭头符号增加设计感
+                p.text = f"➤ {item}" 
                 p.font.size = Pt(20)
                 p.font.bold = True
                 p.space_after = Pt(14)
@@ -448,33 +435,32 @@ class AdvancedPPTMaker:
         return ppt_stream
 
 # ==========================================
-# 4. Streamlit 网页前端
+# 5. Streamlit 网页前端
 # ==========================================
 st.set_page_config(page_title="Pro级肿瘤病例PPT生成", layout="wide")
 st.title("🩺 医疗级病史 PPT 自动生成排版系统")
 
-tab1, tab2 = st.tabs(["📸 多图连拍识别 (OCR)", "📝 电子病历粘贴"])
+tab1, tab2 = st.tabs(["📸 传图识别 (OCR)", "📝 电子病历粘贴"])
 
 if "ocr_result_text" not in st.session_state:
     st.session_state.ocr_result_text = ""
 
 with tab1:
     st.markdown("### 第一步：批量上传病历图片")
-
-    # 👇 ================= 新增的代码段 ================= 👇
+    
     st.warning("""
     **💡 上传图片最佳实践与要求（防乱码必读）：**
     1. **最佳格式**：请直接上传电脑系统原图截图（推荐使用微信 `Alt+A` 截图保存）或高清扫描件。
-    2. **⚠️ 对屏拍照注意**：请**用手机直接拍摄电脑屏幕不要包含大量的波纹**！屏幕的摩尔纹会严重干扰 AI 识别，导致提取出火星文乱码。
+    2. **⚠️ 严禁对屏拍照**：请**千万不要用手机直接拍摄电脑屏幕**！屏幕的摩尔纹会严重干扰 AI 识别，导致提取出火星文乱码。
     3. **大小限制**：单张图片请尽量控制在 **4MB 以内**。
     """)
-    # 👆 ============================================== 👆
-
+    
     uploaded_files = st.file_uploader(
-        "支持拍照上传多张化验单、出院小结等（按顺序多选即可）", 
+        "支持上传多张化验单、出院小结等（按顺序多选即可）", 
         type=["png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
+    
     if uploaded_files:
         st.info(f"📁 已选择 {len(uploaded_files)} 张图片。")
         if st.button("🔍 开始批量提取文字"):
@@ -508,6 +494,7 @@ with tab1:
                 with st.spinner('📊 正在为您自动绘制时间轴并排版幻灯片...'):
                     maker = AdvancedPPTMaker(case_json)
                     ppt_file = maker.build()
+                
                 st.success("✅ 深度解析成功！您可以下载完整 PPT，或直接复制下方的逻辑流。")
                 
                 # 1. PPT 下载按钮
@@ -518,11 +505,11 @@ with tab1:
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                 )
                 
-                # 2. 网页端直接展示病例逻辑线
+                # 2. 网页端直接展示病例逻辑线 (Markdown)
                 st.markdown("---")
-                st.markdown("### 📋 病例全病程逻辑线 (可直接复制)")
-                # 用 info 框把它包裹起来，视觉上更好看
+                st.markdown("### 📋 病例全病程逻辑线 (Cheat Sheet)")
                 st.info(render_logic_line_markdown(case_json))
+                
             except Exception as e:
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
 
@@ -539,20 +526,26 @@ with tab2:
                 with st.spinner('📊 正在为您自动排版幻灯片...'):
                     maker = AdvancedPPTMaker(case_json)
                     ppt_file = maker.build()
+                
                 st.success("✅ 深度解析成功！您可以下载完整 PPT，或直接复制下方的逻辑流。")
                 
                 # 1. PPT 下载按钮
-                st.download_button(
-                    label="📥 立即下载完整 PPT",
-                    data=ppt_file,
-                    file_name="病例汇报_Pro版.pptx",
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                )
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.download_button(
+                        label="📥 立即下载完整 PPT",
+                        data=ppt_file,
+                        file_name="病例汇报_文本版.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+                with col2:
+                    with st.expander("点击查看底层 JSON 树"):
+                        st.json(case_json)
                 
-                # 2. 网页端直接展示病例逻辑线
+                # 2. 网页端直接展示病例逻辑线 (Markdown)
                 st.markdown("---")
-                st.markdown("### 📋 病例全病程逻辑线 (可直接复制)")
-                # 用 info 框把它包裹起来，视觉上更好看
-                st.info(render_logic_line_markdown(case_json)) 
+                st.markdown("### 📋 病例全病程逻辑线 (Cheat Sheet)")
+                st.info(render_logic_line_markdown(case_json))
+                
             except Exception as e:
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
