@@ -132,6 +132,33 @@ def extract_complex_case(patient_text):
     )
     return json.loads(response.choices[0].message.content)
 
+def render_logic_line_markdown(data):
+    """将 JSON 转化为一目了然的 Markdown 病例逻辑流"""
+    lines = []
+    
+    # 1. 基线部分
+    base = data.get("baseline", {})
+    lines.append(f"#### 👤 {base.get('patient_info', '患者')} | {base.get('diagnosis', '未提供诊断')}")
+    lines.append(f"> **关键基线检查**：{base.get('key_exams', '无')}\n")
+    
+    # 2. 治疗演变 (垂直流)
+    for tx in data.get("treatments", []):
+        lines.append(f"**⬇️ {tx.get('phase', '阶段治疗')}** `({tx.get('duration', '')})`")
+        lines.append(f"- **方案**：{tx.get('regimen', '')}")
+        lines.append(f"- **评估**：{tx.get('imaging', '')} | {tx.get('markers', '')}\n")
+        
+    # 3. 转归部分
+    adm = data.get("current_admission")
+    if adm:
+        lines.append(f"**➡️ 本次转归与计划**")
+        exams = "；".join(adm.get("exams", [])) if isinstance(adm.get("exams", []), list) else str(adm.get("exams", ""))
+        lines.append(f"- **异常指标**：{exams}")
+        lines.append(f"- **影像评估**：{adm.get('imaging', '')}")
+        plan = "；".join(adm.get("plan", [])) if isinstance(adm.get("plan", []), list) else str(adm.get("plan", ""))
+        lines.append(f"- **后续处理**：{plan}")
+        
+    return "\n".join(lines)
+
 # ==========================================
 # 3. PPT 生成模块 (升级：复刻参考图的总结页布局)
 # ==========================================
@@ -481,13 +508,21 @@ with tab1:
                 with st.spinner('📊 正在为您自动绘制时间轴并排版幻灯片...'):
                     maker = AdvancedPPTMaker(case_json)
                     ppt_file = maker.build()
-                st.success("✅ 专业版病例幻灯片已生成就绪！")
+                st.success("✅ 深度解析成功！您可以下载完整 PPT，或直接复制下方的逻辑流。")
+                
+                # 1. PPT 下载按钮
                 st.download_button(
-                    label="📥 立即下载 PPT (含深度思考版)",
+                    label="📥 立即下载完整 PPT",
                     data=ppt_file,
-                    file_name="病例汇报_深度思考版.pptx",
+                    file_name="病例汇报_Pro版.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                 )
+                
+                # 2. 网页端直接展示病例逻辑线
+                st.markdown("---")
+                st.markdown("### 📋 病例全病程逻辑线 (可直接复制)")
+                # 用 info 框把它包裹起来，视觉上更好看
+                st.info(render_logic_line_markdown(case_json))
             except Exception as e:
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
 
@@ -504,17 +539,20 @@ with tab2:
                 with st.spinner('📊 正在为您自动排版幻灯片...'):
                     maker = AdvancedPPTMaker(case_json)
                     ppt_file = maker.build()
-                st.success("✅ 专业版病例幻灯片已生成就绪！")
-                col1, col2 = st.columns([2, 1])
-                with col1:
-                    with st.expander("点击查看 AI 解析出的结构化病历树"):
-                        st.json(case_json)
-                with col2:
-                    st.download_button(
-                        label="📥 立即下载 PPT",
-                        data=ppt_file,
-                        file_name="病例汇报_文本版.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                    )
+                st.success("✅ 深度解析成功！您可以下载完整 PPT，或直接复制下方的逻辑流。")
+                
+                # 1. PPT 下载按钮
+                st.download_button(
+                    label="📥 立即下载完整 PPT",
+                    data=ppt_file,
+                    file_name="病例汇报_Pro版.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                )
+                
+                # 2. 网页端直接展示病例逻辑线
+                st.markdown("---")
+                st.markdown("### 📋 病例全病程逻辑线 (可直接复制)")
+                # 用 info 框把它包裹起来，视觉上更好看
+                st.info(render_logic_line_markdown(case_json)) 
             except Exception as e:
                 st.error(f"❌ 运行出错，请核对：{str(e)}")
