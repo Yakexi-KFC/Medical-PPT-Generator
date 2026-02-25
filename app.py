@@ -62,20 +62,20 @@ def extract_complex_case(patient_text):
         api_key=DEEPSEEK_API_KEY, 
         base_url="https://api.deepseek.com"
     )
+    
+    # 【优化核心】：放权临床推理，锁死输出接口
     system_prompt = """
-    你是一位极其严谨的肿瘤内科主任医师，正在准备一场高水平的学术会议病例汇报。
+    你是一位顶级的肿瘤内科专家，正在梳理一份复杂的临床病历，准备进行高水平的学术会议汇报（如胃肠肿瘤或妇科肿瘤领域的病例探讨）。
     
-    【指令 1：严谨的治疗线数判定】
-    - **非手术患者**：初始治疗绝对属于【一线治疗】，严禁标记为辅助。
-    - **同线判定**：未PD（进展）时的维持治疗或加药调整，属于同一线。明确PD后换方案才算下一线。
-    - **完整性**：必须完整保留放疗、介入及具体的用药方案原文（包含前期的化疗和后期的维持/加药）。
+    【核心任务与自由度】
+    1. 自由梳理逻辑：请发挥你的专业临床判断力，自主分析患者的疾病进展时间轴。你来决定如何划分治疗线数（一线、二线、维持治疗等），并准确判断不同阶段的疗效转归（PR/SD/PD 等）。
+    2. 深度医学提炼：不要单纯当一个“文字搬运工”。请计算关键生存指标，评估治疗策略的得失，敏锐捕捉病程中的矛盾点或亮点（例如：特定靶向药跨线使用的疗效、某种耐药机制的出现等）。
     
-    【指令 2：深度总结与思考 (Target: Professor Level)】
-    - 不要只复述病史。请计算患者的总生存期（OS），评价其治疗效果。
-    - 总结治疗策略的亮点（如“多靶点TKI跨线使用”、“免疫联合化疗”）。
-    - 敏锐捕捉临床矛盾点（如“肿瘤标志物飙升但影像学SD”），并据此提出具有探讨价值的临床问题。
+    【系统接口规范（极度重要）】
+    为了对接下游的 PPT 自动渲染系统，你**必须且只能**输出一个标准的 JSON 对象。
+    严禁改变以下任何一个键名（Key），你可以根据你的临床推理自由填充对应的值（Value）：
     
-    必须严格输出为以下 JSON 格式：
+    ```json
     {
         "cover": {"title": "晚期XXX癌综合治疗病例汇报"},
         "baseline": {
@@ -86,47 +86,67 @@ def extract_complex_case(patient_text):
         },
         "treatments": [
             {
-                "phase": "阶段（如：一线治疗 / 四线治疗）", 
+                "phase": "阶段名称（由你自主判断，如：一线治疗 / 维持治疗）", 
                 "duration": "具体时间段", 
-                "regimen": "【严禁遗漏】完整保留该阶段方案（含维持/加药）及局部治疗", 
-                "imaging": "影像学评估",
-                "markers": "标志物变化"
+                "regimen": "完整的用药方案及局部治疗手段", 
+                "imaging": "影像学评估结果",
+                "markers": "肿瘤标志物变化"
             }
         ],
         "current_admission": {
-            "exams": ["检验指标1", "检验指标2"],
-            "imaging": "本次影像结论",
-            "plan": ["计划1", "计划2"]
+            "exams": ["检验异常指标1", "检验异常指标2"],
+            "imaging": "本次核心影像结论",
+            "plan": ["后续治疗计划或考量1", "考量2"]
         },
         "timeline_events": [
             {
                 "date": "年月", 
-                "phase": "线数（如'一线'、'二线维持'、'评估'）",
+                "phase": "线数或阶段",
                 "event_type": "Treatment 或 Evaluation",
-                "event": "事件简述(限15字)"
+                "event": "高度凝练的事件短语"
             }
         ],
         "summary": {
             "highlights": [
-                "亮点1：如'高龄患者：长期带瘤生存(OS > 3年)'", 
-                "亮点2：如'标志物与影像分离：CA19-9持续飙升但影像学SD'"
+                "由你提炼的病例亮点1", 
+                "由你提炼的病例亮点2"
             ],
             "discussion": [
-                "思考1：如'在标志物升高而影像学SD的情况下，是否应更积极更换方案？'"
+                "值得探讨的临床深度问题1",
+                "值得探讨的临床深度问题2"
             ]
         }
     }
-    注意：timeline_events 最多提取12个重要节点。
+    ```
     """
+    
     response = client.chat.completions.create(
         model="deepseek-reasoner",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": patient_text}
-        ],
-        response_format={"type": "json_object"}
+        ]
+        # 注意：移除了 response_format，因为 reasoner 模型不支持强制 JSON 模式
     )
-    return json.loads(response.choices[0].message.content)
+    
+    # 获取模型的最终输出内容（忽略前面冗长的 <think> 推理过程）
+    raw_content = response.choices[0].message.content
+    
+    # 增加鲁棒性清洗：确保去除 Markdown 的代码块标记，提取纯 JSON 字符串
+    try:
+        # 去除可能包含的 ```json 和 ``` 标记
+        if "```json" in raw_content:
+            json_str = raw_content.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw_content:
+            json_str = raw_content.split("```")[1].split("```")[0].strip()
+        else:
+            json_str = raw_content.strip()
+            
+        return json.loads(json_str)
+        
+    except json.JSONDecodeError as e:
+        # 如果模型偶尔没有严格遵守 JSON 格式，返回友好的报错信息
+        raise ValueError(f"AI 生成的数据无法解析为 JSON，请重试。原始返回摘要：{raw_content[:100]}...")
 
 # ==========================================
 # 3. 网页端 Markdown 逻辑流生成器 (备用Cheat Sheet)
