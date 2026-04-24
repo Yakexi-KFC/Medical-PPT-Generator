@@ -121,7 +121,7 @@ def extract_complex_case(patient_text):
     """
     
     response = client.chat.completions.create(
-        model="deepseek-reasoner",
+        model="deepseek-v4-pro",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": patient_text}
@@ -476,7 +476,7 @@ with tab1:
     """)
     
     uploaded_files = st.file_uploader(
-        "支持上传多张化验单、出院小结等（按顺序多选即可）", 
+        "支持上传多张病历截图、出院小结等（按顺序多选即可）", 
         type=["png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
