@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>肿瘤病例 PPT 生成工作台</title>
+  <style>
+    :root {
+      --primary: #b00086;
+      --primary-dark: #7e0067;
+      --accent: #ec008c;
+      --accent-soft: #ffe4f3;
+      --ink: #25232a;
+      --muted: #6f6b76;
+      --line: #ded9e1;
+      --panel: #ffffff;
+      --soft: #f7f5f8;
+      --success: #8a2b79;
+      --warning-bg: #fff4fa;
+      --warning-line: #f3a4d1;
+      --danger: #c01865;
+      --shadow: 0 18px 45px rgba(70, 58, 76, 0.10);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #faf8fb 0%, #f0edf2 44%, #fbfafc 100%);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 22px 0 48px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(122, 31, 54, 0.14);
+      border-radius: 8px;
+      padding: 34px 318px 30px 38px;
+      background:
+        linear-gradient(135deg, rgba(176, 0, 134, 0.95), rgba(236, 0, 140, 0.88)),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.10) 0, rgba(255,255,255,0.10) 1px, transparent 1px, transparent 22px);
+      color: #fff;
+      box-shadow: 0 22px 55px rgba(86, 0, 74, 0.15);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -20px;
+      bottom: -44px;
+      width: 260px;
+      height: 150px;
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 50%;
+      transform: rotate(-15deg);
+    }
+
+    .brand-logo {
+      position: absolute;
+      top: 24px;
+      right: 28px;
+      z-index: 1;
+      width: 240px;
+      max-width: 28%;
+      padding: 14px 16px 12px;
+      border: 1px solid rgba(255,255,255,0.55);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.92);
+      box-shadow: 0 14px 28px rgba(86, 0, 74, 0.16);
+    }
+
+    .brand-logo svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .kicker {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border: 1px solid rgba(255,255,255,0.22);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.14);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .hero h1 {
+      position: relative;
+      max-width: 780px;
+      margin: 16px 0 10px;
+      font-size: clamp(30px, 4.2vw, 48px);
+      line-height: 1.08;
+      font-weight: 850;
+    }
+
+    .hero p {
+      position: relative;
+      max-width: 800px;
+      margin: 0;
+      color: rgba(255,255,255,0.86);
+      font-size: 16px;
+      line-height: 1.75;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0;
+    }
+
+    .metric-card {
+      min-height: 86px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 15px;
+      background: rgba(255,255,255,0.88);
+      box-shadow: 0 12px 28px rgba(70, 58, 76, 0.06);
+    }
+
+    .metric-label {
+      margin: 0 0 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metric-value {
+      margin: 0;
+      color: var(--ink);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+      margin-top: 20px;
+    }
+
+    .tab-btn {
+      min-height: 48px;
+      padding: 0 22px;
+      border: 1px solid transparent;
+      border-bottom: 0;
+      border-radius: 8px 8px 0 0;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .tab-btn.active {
+      background: #ffffff;
+      border-color: var(--line);
+      color: var(--primary);
+      box-shadow: 0 -8px 22px rgba(25, 42, 70, 0.04);
+    }
+
+    .tab-panel {
+      display: none;
+      padding-top: 16px;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    .section-card {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--primary);
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin: 16px 0 14px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .section-card.accent {
+      border-left-color: var(--accent);
+    }
+
+    .section-kicker {
+      margin: 0 0 6px;
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .section-card.accent .section-kicker {
+      color: var(--accent);
+    }
+
+    .section-title {
+      margin: 0 0 6px;
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 850;
+    }
+
+    .section-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .guideline-panel {
+      border: 1px solid var(--warning-line);
+      border-radius: 8px;
+      padding: 15px 17px;
+      margin: 4px 0 18px;
+      background: var(--warning-bg);
+    }
+
+    .guideline-panel strong {
+      color: #8a4a00;
+    }
+
+    .guideline-panel ul {
+      margin: 8px 0 0 18px;
+      padding: 0;
+      color: #6b3154;
+      line-height: 1.75;
+    }
+
+    .uploader {
+      border: 1px dashed #9fb4c5;
+      border-radius: 8px;
+      padding: 24px;
+      background: #fffafd;
+      text-align: center;
+    }
+
+    .uploader input {
+      width: min(520px, 100%);
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .hint {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status {
+      display: none;
+      margin: 14px 0;
+      padding: 13px 15px;
+      border-radius: 8px;
+      border: 1px solid rgba(15, 95, 120, 0.16);
+      background: #fff1f8;
+      color: #7e0067;
+      font-weight: 700;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .form-field {
+      margin: 14px 0;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: #344054;
+      font-weight: 750;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 310px;
+      resize: vertical;
+      border: 1px solid #cbd5df;
+      border-radius: 8px;
+      padding: 14px 15px;
+      background: #ffffff;
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1.65;
+      outline: none;
+    }
+
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(236, 0, 140, 0.12);
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .btn {
+      width: 100%;
+      min-height: 46px;
+      border: 1px solid var(--primary);
+      border-radius: 8px;
+      background: var(--primary);
+      color: #ffffff;
+      font-weight: 850;
+      cursor: pointer;
+      box-shadow: 0 10px 20px rgba(176, 0, 134, 0.16);
+    }
+
+    .btn:hover {
+      border-color: var(--primary-dark);
+      background: var(--primary-dark);
+    }
+
+    .btn.secondary {
+      border-color: var(--line);
+      background: #fff;
+      color: var(--ink);
+      box-shadow: none;
+    }
+
+    .result-card {
+      display: none;
+      border: 1px solid rgba(176, 0, 134, 0.22);
+      border-left: 5px solid var(--success);
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin: 18px 0 12px;
+      background: #fff1f8;
+    }
+
+    .result-card.show {
+      display: block;
+    }
+
+    .result-card h3 {
+      margin: 0 0 4px;
+      color: var(--success);
+      font-size: 20px;
+    }
+
+    .result-card p {
+      margin: 0;
+      color: #6b3154;
+      font-size: 14px;
+    }
+
+    .logic-box {
+      display: none;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: #ffffff;
+      box-shadow: 0 12px 30px rgba(70, 58, 76, 0.06);
+    }
+
+    .logic-box.show {
+      display: block;
+    }
+
+    .logic-box h3 {
+      margin: 0 0 12px;
+      font-size: 20px;
+    }
+
+    .logic-box ul {
+      margin: 0;
+      padding-left: 20px;
+      color: #344054;
+      line-height: 1.8;
+    }
+
+    .footer-note {
+      margin-top: 24px;
+      padding: 13px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .metric-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .hero {
+        padding: 28px 22px;
+      }
+
+      .brand-logo {
+        position: relative;
+        top: auto;
+        right: auto;
+        width: 210px;
+        max-width: 100%;
+        margin-bottom: 22px;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .page {
+        width: min(100% - 20px, 1180px);
+      }
+
+      .metric-grid,
+      .actions {
+        grid-template-columns: 1fr;
+      }
+
+      .tabs {
+        gap: 4px;
+      }
+
+      .tab-btn {
+        flex: 1;
+        padding: 0 10px;
+      }
+
+      .section-title {
+        font-size: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="brand-logo" aria-label="和黄医药 HUTCHMED logo">
+        <svg viewBox="0 0 400 190" role="img" aria-labelledby="logo-title">
+          <title id="logo-title">和黄医药 HUTCHMED</title>
+          <g fill="none" stroke-linecap="round">
+            <path d="M210 12v54" stroke="#b00086" stroke-width="18"/>
+            <path d="M244 44v25" stroke="#b00086" stroke-width="16"/>
+            <path d="M276 41v31" stroke="#ec008c" stroke-width="16"/>
+            <path d="M308 43v31" stroke="#ec008c" stroke-width="16"/>
+            <path d="M340 45v29" stroke="#ec008c" stroke-width="16"/>
+            <path d="M364 47v44" stroke="#ec008c" stroke-width="16"/>
+            <path d="M386 52v22" stroke="#ec008c" stroke-width="16"/>
+          </g>
+          <text x="0" y="139" fill="#b00086" font-size="62" font-weight="900" font-family="Microsoft YaHei, SimHei, sans-serif">和黄</text>
+          <text x="150" y="139" fill="#ec008c" font-size="62" font-weight="900" font-family="Microsoft YaHei, SimHei, sans-serif">医药</text>
+          <text x="2" y="178" fill="#b00086" font-size="31" font-weight="900" letter-spacing="0" font-family="Arial, sans-serif">HUTCHMED</text>
+        </svg>
+      </div>
+      <div class="kicker">Case Slide Studio · Oncology Workflow</div>
+      <h1>肿瘤病例 PPT 自动生成工作台</h1>
+      <p>将病历截图或电子病历转换为结构化病例资料，并自动生成适合病例讨论、科室汇报和学术交流的 PowerPoint。</p>
+    </section>
+
+    <section class="metric-grid" aria-label="功能概览">
+      <article class="metric-card">
+        <p class="metric-label">入口</p>
+        <p class="metric-value">OCR / 文本</p>
+      </article>
+      <article class="metric-card">
+        <p class="metric-label">结构化</p>
+        <p class="metric-value">分线推断</p>
+      </article>
+      <article class="metric-card">
+        <p class="metric-label">输出</p>
+        <p class="metric-value">PPTX 幻灯片</p>
+      </article>
+      <article class="metric-card">
+        <p class="metric-label">附加</p>
+        <p class="metric-value">逻辑流摘要</p>
+      </article>
+    </section>
+
+    <nav class="tabs" aria-label="输入方式">
+      <button class="tab-btn active" type="button" data-target="ocr-panel">上传图片识别</button>
+      <button class="tab-btn" type="button" data-target="text-panel">粘贴电子病历</button>
+    </nav>
+
+    <section id="ocr-panel" class="tab-panel active">
+      <article class="section-card">
+        <p class="section-kicker">STEP 01</p>
+        <h2 class="section-title">批量上传病历图片</h2>
+        <p class="section-copy">适合处理病历截图、出院小结、检查报告和影像结论截图。建议按病程顺序上传，便于后续时间轴整理。</p>
+      </article>
+
+      <div class="guideline-panel">
+        <strong>上传建议</strong>
+        <ul>
+          <li>优先上传电脑原图截图或高清扫描件，推荐使用微信 Alt+A 截图后保存。</li>
+          <li>如果拍摄电脑屏幕，请保持界面清晰，减少摩尔纹和反光干扰。</li>
+          <li>单张图片建议控制在 4MB 以内，系统会对过大图片做轻度压缩。</li>
+        </ul>
+      </div>
+
+      <div class="uploader">
+        <label for="case-images">上传病历截图、报告图片或出院小结</label>
+        <input id="case-images" type="file" accept="image/png,image/jpeg" multiple>
+        <p class="hint">可以一次选择多张图片，系统会按照上传顺序进行 OCR 提取。</p>
+      </div>
+
+      <div id="file-status" class="status"></div>
+
+      <article class="section-card accent">
+        <p class="section-kicker">STEP 02</p>
+        <h2 class="section-title">人工校对与补全</h2>
+        <p class="section-copy">请补充 OCR 未识别到的关键诊疗信息，包括病理、基因检测、治疗方案、疗效评估和本次入院计划。</p>
+      </article>
+
+      <div class="form-field">
+        <label for="ocr-text">校对并补全病史</label>
+        <textarea id="ocr-text" placeholder="在这里核对 OCR 结果，也可以直接补充病史、检查、治疗和疗效信息。"></textarea>
+      </div>
+
+      <div class="actions">
+        <button class="btn" type="button" data-generate="ocr-text">自动推断分线并生成 PPT</button>
+        <button class="btn secondary" type="button" data-fill="ocr-text">填入示例病史</button>
+      </div>
+    </section>
+
+    <section id="text-panel" class="tab-panel">
+      <article class="section-card accent">
+        <p class="section-kicker">TEXT MODE</p>
+        <h2 class="section-title">粘贴电子病历</h2>
+        <p class="section-copy">适合直接从医院系统、Word 文档或随访记录中复制长病历。内容越完整，PPT 分线、时间轴和讨论点越稳定。</p>
+      </article>
+
+      <div class="form-field">
+        <label for="case-text">请贴入详细病史</label>
+        <textarea id="case-text" placeholder="建议包含：基本信息、主诉、诊断、病理/分子检测、每线治疗方案、疗效评估、肿瘤标志物变化、本次入院资料和后续计划。"></textarea>
+      </div>
+
+      <div class="actions">
+        <button class="btn" type="button" data-generate="case-text">开始深度解析并生成 PPT</button>
+        <button class="btn secondary" type="button" data-fill="case-text">填入示例病史</button>
+      </div>
+    </section>
+
+    <section id="result-card" class="result-card">
+      <h3>解析完成，PPT 已生成</h3>
+      <p>这是预览版的模拟状态。正式 Streamlit 页面会在这里提供 PPT 下载按钮和底层 JSON 查看入口。</p>
+    </section>
+
+    <section id="logic-box" class="logic-box">
+      <h3>病例全病程逻辑线</h3>
+      <ul>
+        <li>基线资料：晚期消化道肿瘤，病理及分子检测信息已结构化。</li>
+        <li>一线治疗：系统治疗联合局部处理，记录疗效评估节点。</li>
+        <li>转归评估：根据影像和标志物变化生成讨论点。</li>
+        <li>后续计划：整理治疗选择、随访重点和病例汇报亮点。</li>
+      </ul>
+    </section>
+
+    <div class="footer-note">当前页面用于前端布局和交互演示，后续可接入 OCR、AI 解析与真实 PPT 生成服务。</div>
+  </main>
+
+  <script>
+    const sampleText = [
+      "患者，女性，58岁，因腹痛伴体重下降就诊。",
+      "病理提示腺癌，基因检测提示可讨论的靶点阴性，肿瘤标志物升高。",
+      "一线治疗：含铂双药化疗联合免疫治疗，2周期后影像评估部分缓解。",
+      "维持治疗期间肿瘤标志物下降，后续复查提示局部进展。",
+      "本次入院拟完善影像、实验室检查，讨论后线治疗及临床研究入组可能。"
+    ].join("\\n");
+
+    document.querySelectorAll(".tab-btn").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.remove("active"));
+        button.classList.add("active");
+        document.getElementById(button.dataset.target).classList.add("active");
+      });
+    });
+
+    const fileInput = document.getElementById("case-images");
+    const fileStatus = document.getElementById("file-status");
+    fileInput.addEventListener("change", () => {
+      const count = fileInput.files.length;
+      if (!count) {
+        fileStatus.classList.remove("show");
+        return;
+      }
+      fileStatus.textContent = `已选择 ${count} 张图片。预览版不会真实上传，正式页面会在这里进入 OCR 流程。`;
+      fileStatus.classList.add("show");
+    });
+
+    document.querySelectorAll("[data-fill]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.getElementById(button.dataset.fill).value = sampleText;
+      });
+    });
+
+    document.querySelectorAll("[data-generate]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const target = document.getElementById(button.dataset.generate);
+        if (target.value.trim().length < 20) {
+          alert("病史太短，请补充详细记录。");
+          target.focus();
+          return;
+        }
+
+        document.getElementById("result-card").classList.add("show");
+        document.getElementById("logic-box").classList.add("show");
+        document.getElementById("result-card").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+  </script>
+</body>
+</html>
