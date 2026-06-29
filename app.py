@@ -530,7 +530,7 @@ def inject_frontend_style():
             overflow: hidden;
             border: 1px solid rgba(122, 31, 54, 0.14);
             border-radius: 8px;
-            padding: 34px 318px 30px 38px;
+            padding: 34px 38px 30px;
             background:
                 linear-gradient(135deg, rgba(176, 0, 134, 0.95), rgba(236, 0, 140, 0.88)),
                 repeating-linear-gradient(90deg, rgba(255,255,255,0.10) 0, rgba(255,255,255,0.10) 1px, transparent 1px, transparent 22px);
@@ -549,26 +549,6 @@ def inject_frontend_style():
             border: 1px solid rgba(255,255,255,0.28);
             border-radius: 50%;
             transform: rotate(-15deg);
-        }
-
-        .brand-logo {
-            position: absolute;
-            top: 24px;
-            right: 28px;
-            z-index: 1;
-            width: 240px;
-            max-width: 28%;
-            padding: 14px 16px 12px;
-            border: 1px solid rgba(255,255,255,0.55);
-            border-radius: 8px;
-            background: rgba(255,255,255,0.92);
-            box-shadow: 0 14px 28px rgba(86, 0, 74, 0.16);
-        }
-
-        .brand-logo svg {
-            display: block;
-            width: 100%;
-            height: auto;
         }
 
         .case-kicker {
@@ -700,14 +680,6 @@ def inject_frontend_style():
                 padding: 28px 22px;
             }
 
-            .brand-logo {
-                position: relative;
-                top: auto;
-                right: auto;
-                width: 210px;
-                max-width: 100%;
-                margin-bottom: 22px;
-            }
         }
 
         @media (max-width: 620px) {
@@ -725,23 +697,6 @@ def render_workbench_header():
     st.markdown(
         """
         <section class="case-hero">
-          <div class="brand-logo" aria-label="和黄医药 HUTCHMED logo">
-            <svg viewBox="0 0 400 190" role="img" aria-labelledby="logo-title">
-              <title id="logo-title">和黄医药 HUTCHMED</title>
-              <g fill="none" stroke-linecap="round">
-                <path d="M210 12v54" stroke="#b00086" stroke-width="18"/>
-                <path d="M244 44v25" stroke="#b00086" stroke-width="16"/>
-                <path d="M276 41v31" stroke="#ec008c" stroke-width="16"/>
-                <path d="M308 43v31" stroke="#ec008c" stroke-width="16"/>
-                <path d="M340 45v29" stroke="#ec008c" stroke-width="16"/>
-                <path d="M364 47v44" stroke="#ec008c" stroke-width="16"/>
-                <path d="M386 52v22" stroke="#ec008c" stroke-width="16"/>
-              </g>
-              <text x="0" y="139" fill="#b00086" font-size="62" font-weight="900" font-family="Microsoft YaHei, SimHei, sans-serif">和黄</text>
-              <text x="150" y="139" fill="#ec008c" font-size="62" font-weight="900" font-family="Microsoft YaHei, SimHei, sans-serif">医药</text>
-              <text x="2" y="178" fill="#b00086" font-size="31" font-weight="900" letter-spacing="0" font-family="Arial, sans-serif">HUTCHMED</text>
-            </svg>
-          </div>
           <div class="case-kicker">Case Slide Studio · Oncology Workflow</div>
           <h1>肿瘤病例 PPT 自动生成工作台</h1>
           <p>将病历截图或电子病历转换为结构化病例资料，并自动生成适合病例讨论、科室汇报和学术交流的 PowerPoint。</p>
