@@ -131,6 +131,50 @@ def inject_frontend_style():
             line-height: 1.75;
         }
 
+        .case-release {
+            position: relative;
+            z-index: 1;
+            margin-top: 24px;
+            padding-top: 18px;
+            border-top: 1px solid rgba(255,255,255,0.28);
+        }
+
+        .case-release-label {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 10px;
+            margin-bottom: 12px;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .case-release-label time {
+            font-size: 13px;
+            font-weight: 400;
+            color: rgba(255,255,255,0.8);
+        }
+
+        .case-release-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 22px;
+        }
+
+        .case-release-item strong {
+            display: block;
+            margin-bottom: 5px;
+            color: #ffffff;
+            font-size: 15px;
+        }
+
+        .case-hero .case-release-item p {
+            max-width: none;
+            font-size: 14px;
+            line-height: 1.7;
+            color: rgba(255,255,255,0.9);
+        }
+
         .metric-grid {
             display: grid;
             grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -224,6 +268,11 @@ def inject_frontend_style():
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
+            .case-release-grid {
+                grid-template-columns: 1fr;
+                gap: 14px;
+            }
+
             .case-hero {
                 padding: 28px 22px;
             }
@@ -248,6 +297,23 @@ def render_workbench_header():
           <div class="case-kicker">Case Slide Studio · Oncology Workflow</div>
           <h1>肿瘤病例 PPT 自动生成工作台</h1>
           <p>识别影像、病理与基因检测报告，裁剪关键区域，按病程整理为图文病例幻灯。</p>
+          <section class="case-release" aria-label="本次更新说明">
+            <div class="case-release-label">本次更新 <time datetime="2026-10-22">2026.10.22</time></div>
+            <div class="case-release-grid">
+              <div class="case-release-item">
+                <strong>图片识别与裁剪</strong>
+                <p>通过 DeepSeek API 识别影像、病理及基因检测资料，支持逐图核对和裁剪调整。</p>
+              </div>
+              <div class="case-release-item">
+                <strong>标准病例排版</strong>
+                <p>支持保留完整报告主体和病理图组，正文以叙述和分点为主，相近检查集中呈现。</p>
+              </div>
+              <div class="case-release-item">
+                <strong>可编辑诊疗时间轴</strong>
+                <p>按已记录日期梳理诊疗经过，区分已实施治疗与后续计划。</p>
+              </div>
+            </div>
+          </section>
         </section>
         <section class="metric-grid" aria-label="功能概览">
           <article class="metric-card">
