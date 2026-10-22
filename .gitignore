@@ -1,3 +1,7 @@
 __pycache__/
 *.py[cod]
 frontend_preview.html
+.venv/
+.local-deps/
+.streamlit/secrets.toml
+test-output/
